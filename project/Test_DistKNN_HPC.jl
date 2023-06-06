@@ -47,6 +47,18 @@ file_c_dists = "./KNNdata/Higgs_c_dists.dat"
 file_p_indxs = "./KNNdata/Higgs_p_indxs.dat"
 file_p_dists = "./KNNdata/Higgs_p_dists.dat"
 
+file_rpg_indxs = "./KNNdata/Higgs_rpg_indxs.dat"
+file_rpg_dists = "./KNNdata/Higgs_rpg_dists.dat"
+
+file_rpc_indxs = "./KNNdata/Higgs_rpc_indxs.dat"
+file_rpc_dists = "./KNNdata/Higgs_rpc_dists.dat"
+
+file_cg_indxs = "./KNNdata/Higgs_cg_indxs.dat"
+file_cg_dists = "./KNNdata/Higgs_cg_dists.dat"
+
+file_cc_indxs = "./KNNdata/Higgs_cc_indxs.dat"
+file_cc_dists = "./KNNdata/Higgs_cc_dists.dat"
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~                 Utilities
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -320,7 +332,7 @@ end
 # ~~~                 Testing code
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-function batchHiggs(
+function batchTest(
       filename_input::String,
       file_d_indxs::String,
       file_d_dists::String,
@@ -340,45 +352,52 @@ function batchHiggs(
       in_memory::Bool = false
       )
 
-
-      resultsAcc = zeros(Float64, 7,5)
-      resultsErr = zeros(Float64, 7,5)
-      resultsTime = zeros(Float64, 7,5)
+      nPoints = 6
+      nAlg = 8
       
-      resultsBest = zeros(Float64, 7,3)
-      resultsBest2 = zeros(Float64, 7,3)
-      resultsBest3 = zeros(Float64, 7,3)
-      resultsBest4 = zeros(Float64, 7,3)
+      resultsAcc = zeros(Float64, nPoints,nAlg)
+      resultsErr = zeros(Float64, nPoints,nAlg)
+      resultsTime = zeros(Float64, nPoints,nAlg)
       
-      points = [100000 200000 300000 500000 600000 800000 1000000]
+      resultsBest = zeros(Float64, nPoints,nAlg)
+      resultsBest2 = zeros(Float64, nPoints,nAlg)
+      resultsBest3 = zeros(Float64, nPoints,nAlg)
+      resultsBest4 = zeros(Float64, nPoints,nAlg)
       
-      nam = ["100000" "200000" "300000" "500000" "600000" "800000" "1000000"]
-      alg = ["FLANN (bf)" "FLANN (app)" "GPU"]
-      pal = palette(:Paired_5)
+      pointsC = [10000 25000 50000 100000 150000 200000]
+      if filename_input_C == filename_input_Q
+         pointsQ = [10000 25000 50000 100000 150000 200000]
+      else
+         pointsQ = [2500 5000 10000 20000 30000 40000 50000]
+      end
+      
+      nam = ["10000" "25000" "50000" "100000" "150000" "200000"]
+      alg = ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"]
+      pal = palette(:Paired_8)
       
       cid = 1
-      for count_p in 1:3     
+      for count_p in 1:2     
           println("=========================================")
-          println("\t Starting loop for $(points[count_p]) points")
+          println("\t Starting loop for $(pointsC[count_p]) Corpus points and $(pointsQ[count_p]) Query points")
           println("=========================================")
           
           println("\nCalculating cpu results")
          if in_memory == false
               if bench == true
-                  b_t = @belapsed distributedKNN($filename_input,$file_c_indxs,$file_c_dists,$k,$d, $points[$count_p],$C_size,$Q_size,3,$in_memory)
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_c_indxs,$file_c_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,3,$in_memory)
               else
-                  b_t = @elapsed distributedKNN(filename_input,file_c_indxs,file_c_dists,k,d, points[count_p],C_size,Q_size,3,in_memory)
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_c_indxs,file_c_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,3,in_memory)
               end
               resultsAcc[count_p,4] = 100.0
               resultsErr[count_p,4] = 0.0
               resultsTime[count_p,4] = b_t
           else
-              indxs_c = zeros(Int32,k+1,points[count_p])
-              dists_c = zeros(Float32,k+1,points[count_p])
+              indxs_c = zeros(Int32,k+1,pointsQ[count_p])
+              dists_c = zeros(Float32,k+1,pointsQ[count_p])
               if bench == true
-                  b_t = @belapsed $indxs_c, $dists_c = distributedKNN($filename_input,$k,$d, $points[$count_p],$C_size,$Q_size,3,$in_memory)
+                  b_t = @belapsed $indxs_c, $dists_c = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,3,$in_memory)
               else
-                  b_t = @elapsed indxs_c, dists_c = distributedKNN(filename_input,k,d, points[count_p],C_size,Q_size,3,in_memory)
+                  b_t = @elapsed indxs_c, dists_c = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,3,in_memory)
               end
               resultsAcc[count_p,4] = 100.0
               resultsErr[count_p,4] = 0.0
@@ -392,20 +411,20 @@ function batchHiggs(
           println("\nCalculating FLANN brute force results")
           if in_memory == false
               if bench == true
-                  b_t = @belapsed distributedKNN($filename_input,$file_d_indxs,$file_d_dists,$k,$d, $points[$count_p],$C_size,$Q_size,0,$in_memory)
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_d_indxs,$file_d_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,0,$in_memory)
               else
-                  b_t = @elapsed distributedKNN(filename_input,file_d_indxs,file_d_dists,k,d, points[count_p],C_size,Q_size,0,in_memory)
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_d_indxs,file_d_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,0,in_memory)
               end
               resultsAcc[count_p,1] = calcAcc_bin(file_c_indxs,file_d_indxs,k,Int32)
               resultsErr[count_p,1] = calcErr_bin(file_c_dists,file_d_dists,k,Float32)
               resultsTime[count_p,1] = b_t
           else
-              indxs_d = zeros(Int32,k+1,points[count_p])
-              dists_d = zeros(Float32,k+1,points[count_p])
+              indxs_d = zeros(Int32,k+1,pointsQ[count_p])
+              dists_d = zeros(Float32,k+1,pointsQ[count_p])
               if bench == true
-                  b_t = @belapsed $indxs_d, $dists_d = distributedKNN($filename_input,$k,$d, $points[$count_p],$C_size,$Q_size,0,$in_memory)
+                  b_t = @belapsed $indxs_d, $dists_d = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,0,$in_memory)
               else
-                  b_t = @elapsed indxs_d, dists_d = distributedKNN(filename_input,k,d, points[count_p],C_size,Q_size,0,in_memory)
+                  b_t = @elapsed indxs_d, dists_d = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,0,in_memory)
               end
               resultsAcc[count_p,1] = calcAcc(indxs_c,indxs_d)
               resultsErr[count_p,1] = calcErr(dists_c,dists_d)
@@ -421,20 +440,20 @@ function batchHiggs(
          println("\nCalculating FLANN approximated results")
          if in_memory == false
               if bench == true
-                  b_t = @belapsed distributedKNN($filename_input,$file_a_indxs,$file_a_dists,$k,$d, $points[$count_p],$C_size,$Q_size,1,$in_memory)
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_a_indxs,$file_a_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,1,$in_memory)
               else
-                  b_t = @elapsed distributedKNN(filename_input,file_a_indxs,file_a_dists,k,d, points[count_p],C_size,Q_size,1,in_memory)
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_a_indxs,file_a_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,1,in_memory)
               end
               resultsAcc[count_p,2] = calcAcc_bin(file_c_indxs,file_a_indxs,k,Int32)
               resultsErr[count_p,2] = calcErr_bin(file_c_dists,file_a_dists,k,Float32)
               resultsTime[count_p,2] = b_t
           else
-              indxs_a = zeros(Int32,k+1,points[count_p])
-              dists_a = zeros(Float32,k+1,points[count_p])
+              indxs_a = zeros(Int32,k+1,pointsQ[count_p])
+              dists_a = zeros(Float32,k+1,pointsQ[count_p])
               if bench == true
-                  b_t = @belapsed $indxs_a, $dists_a = distributedKNN($filename_input,$k,$d, $points[$count_p],$C_size,$Q_size,1,$in_memory)
+                  b_t = @belapsed $indxs_a, $dists_a = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,1,$in_memory)
               else
-                  b_t = @elapsed indxs_a, dists_a = distributedKNN(filename_input,k,d, points[count_p],C_size,Q_size,1,in_memory)
+                  b_t = @elapsed indxs_a, dists_a = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,1,in_memory)
               end
               resultsAcc[count_p,2] = calcAcc(indxs_c,indxs_a)
               resultsErr[count_p,2] = calcErr(dists_c,dists_a)
@@ -446,23 +465,23 @@ function batchHiggs(
       
          @everywhere GC.gc(true)
       
-         println("\nCalculating gpu results")
+         println("\nCalculating brute force gpu results")
          if in_memory == false
               if bench == true
-                  b_t = @belapsed distributedKNN($filename_input,$file_g_indxs,$file_g_dists,$k,$d, $points[$count_p],$C_size,$Q_size,2,$in_memory)
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_g_indxs,$file_g_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,2,$in_memory)
               else
-                  b_t = @elapsed distributedKNN(filename_input,file_g_indxs,file_g_dists,k,d, points[count_p],C_size,Q_size,2,in_memory)
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_g_indxs,file_g_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,2,in_memory)
               end
               resultsAcc[count_p,3] = calcAcc_bin(file_c_indxs,file_g_indxs,k,Int32)
               resultsErr[count_p,3] = calcErr_bin(file_c_dists,file_g_dists,k,Float32)
               resultsTime[count_p,3] = b_t
           else
-              indxs_g = zeros(Int32,k+1,points[count_p])
-              dists_g = zeros(Float32,k+1,points[count_p])
+              indxs_g = zeros(Int32,k+1,pointsQ[count_p])
+              dists_g = zeros(Float32,k+1,pointsQ[count_p])
               if bench == true
-                  b_t = @belapsed $indxs_g, $dists_g = distributedKNN($filename_input,$k,$d, $points[$count_p],$C_size,$Q_size,2,$in_memory)
+                  b_t = @belapsed $indxs_g, $dists_g = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,2,$in_memory)
               else
-                  b_t = @elapsed indxs_g, dists_g = distributedKNN(filename_input,k,d, points[count_p],C_size,Q_size,2,in_memory)
+                  b_t = @elapsed indxs_g, dists_g = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,2,in_memory)
               end
               resultsAcc[count_p,3] = calcAcc(indxs_c,indxs_g)
               resultsErr[count_p,3] = calcErr(dists_c,dists_g)
@@ -474,30 +493,141 @@ function batchHiggs(
          @everywhere CUDA.reclaim()
          @everywhere GC.gc(true)
          
-         println("\nCalculating ParallelKNN (gpu) results")
+          println("\nCalculating Random Projection GPU results")
          if in_memory == false
               if bench == true
-                  b_t = @belapsed distributedKNN($filename_input,$file_p_indxs,$file_p_dists,$k,$d, $points[$count_p],$C_size,$Q_size,4,$in_memory)
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_rpg_indxs,$file_rpg_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,6,$in_memory)
               else
-                  b_t = @elapsed distributedKNN(filename_input,file_p_indxs,file_p_dists,k,d, points[count_p],C_size,Q_size,4,in_memory)
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_rpg_indxs,file_rpg_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,6,in_memory)
               end
-              resultsAcc[count_p,5] = calcAcc_bin(file_c_indxs,file_g_indxs,k,Int32)
-              resultsErr[count_p,5] = calcErr_bin(file_c_dists,file_g_dists,k,Float32)
+              resultsAcc[count_p,4] = calcAcc_bin(file_c_indxs,file_rpg_indxs,k,Int32)
+              resultsErr[count_p,4] = calcErr_bin(file_c_dists,file_rpg_dists,k,Float32)
+              resultsTime[count_p,4] = b_t
+          else
+              indxs_rpg = zeros(Int32,k+1,pointsQ[count_p])
+              dists_rpg = zeros(Float32,k+1,pointsQ[count_p])
+              if bench == true
+                  b_t = @belapsed $indxs_rpg, $dists_rpg = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,6,$in_memory,$r,$P)
+              else
+                  b_t = @elapsed indxs_rpg, dists_rpg = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,6,in_memory,r,P)
+              end
+              resultsAcc[count_p,4] = calcAcc(indxs_c,indxs_rpg)
+              resultsErr[count_p,4] = calcErr(dists_c,dists_rpg)
+              resultsTime[count_p,4] = b_t
+          end
+          
+          println("$(resultsTime[count_p,4]) secs")
+          
+         @everywhere CUDA.reclaim()
+         @everywhere GC.gc(true)
+         
+         
+         println("\nCalculating Random Projection CPU results")
+         if in_memory == false
+              if bench == true
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_rpc_indxs,$file_rpc_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,5,$in_memory,$r,$P)
+              else
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_rpc_indxs,file_rpc_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,5,in_memory,r,P)
+              end
+              resultsAcc[count_p,5] = calcAcc_bin(file_c_indxs,file_rpc_indxs,k,Int32)
+              resultsErr[count_p,5] = calcErr_bin(file_c_dists,file_rpc_dists,k,Float32)
               resultsTime[count_p,5] = b_t
           else
-              indxs_p = zeros(Int32,k+1,points[count_p])
-              dists_p = zeros(Float32,k+1,points[count_p])
+              indxs_rpc = zeros(Int32,k+1,pointsQ[count_p])
+              dists_rpc = zeros(Float32,k+1,pointsQ[count_p])
               if bench == true
-                  b_t = @belapsed $indxs_p, $dists_p = distributedKNN($filename_input,$k,$d, $points[$count_p],$C_size,$Q_size,4,$in_memory)
+                  b_t = @belapsed $indxs_rpc, $dists_rpc = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,5,$in_memory,$r,$P)
               else
-                  b_t = @elapsed indxs_p, dists_p = distributedKNN(filename_input,k,d, points[count_p],C_size,Q_size,4,in_memory)
+                  b_t = @elapsed indxs_rpc, dists_rpc = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,5,in_memory,r,P)
               end
-              resultsAcc[count_p,5] = calcAcc(indxs_c,indxs_p)
-              resultsErr[count_p,5] = calcErr(dists_c,dists_p)
+              resultsAcc[count_p,5] = calcAcc(indxs_c,indxs_rpc)
+              resultsErr[count_p,5] = calcErr(dists_c,dists_rpc)
               resultsTime[count_p,5] = b_t
           end
           
-         println("$(resultsTime[count_p,5]) secs")
+          println("$(resultsTime[count_p,5]) secs")
+          
+          
+         println("\nCalculating Cluster TI GPU results")
+         if in_memory == false
+              if bench == true
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_cg_indxs,$file_cg_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,8,$in_memory)
+              else
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_cg_indxs,file_cg_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,8,in_memory)
+              end
+              resultsAcc[count_p,6] = calcAcc_bin(file_c_indxs,file_cg_indxs,k,Int32)
+              resultsErr[count_p,6] = calcErr_bin(file_c_dists,file_cg_dists,k,Float32)
+              resultsTime[count_p,6] = b_t
+          else
+              indxs_cg = zeros(Int32,k+1,pointsQ[count_p])
+              dists_cg = zeros(Float32,k+1,pointsQ[count_p])
+              if bench == true
+                  b_t = @belapsed $indxs_cg, $dists_cg = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,8,$in_memory)
+              else
+                  b_t = @elapsed indxs_cg, dists_cg = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,8,in_memory)
+              end
+              resultsAcc[count_p,6] = calcAcc(indxs_c,indxs_cg)
+              resultsErr[count_p,6] = calcErr(dists_c,dists_cg)
+              resultsTime[count_p,6] = b_t
+          end
+          
+          println("$(resultsTime[count_p,6]) secs")
+         
+         @everywhere CUDA.reclaim()
+         @everywhere GC.gc(true)          
+          
+          
+         println("\nCalculating Cluster TI CPU results")
+         if in_memory == false
+              if bench == true
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_cc_indxs,$file_cc_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,7,$in_memory)
+              else
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_cc_indxs,file_cc_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,7,in_memory)
+              end
+              resultsAcc[count_p,7] = calcAcc_bin(file_c_indxs,file_cc_indxs,k,Int32)
+              resultsErr[count_p,7] = calcErr_bin(file_c_dists,file_cc_dists,k,Float32)
+              resultsTime[count_p,7] = b_t
+          else
+              indxs_cc = zeros(Int32,k+1,pointsQ[count_p])
+              dists_cc = zeros(Float32,k+1,pointsQ[count_p])
+              if bench == true
+                  b_t = @belapsed $indxs_cc, $dists_cc = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,7,$in_memory)
+              else
+                  b_t = @elapsed indxs_cc, dists_cc = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,7,in_memory)
+              end
+              resultsAcc[count_p,7] = calcAcc(indxs_c,indxs_cc)
+              resultsErr[count_p,7] = calcErr(dists_c,dists_cc)
+              resultsTime[count_p,7] = b_t
+          end
+          
+          println("$(resultsTime[count_p,7]) secs")
+
+         @everywhere GC.gc(true)           
+         
+         println("\nCalculating ParallelKNN (gpu) results")
+         if in_memory == false
+              if bench == true
+                  b_t = @belapsed distributedKNN($filename_input_C,$filename_input_Q,$file_p_indxs,$file_p_dists,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,4,$in_memory)
+              else
+                  b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_p_indxs,file_p_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,4,in_memory)
+              end
+              resultsAcc[count_p,8] = calcAcc_bin(file_c_indxs,file_g_indxs,k,Int32)
+              resultsErr[count_p,8] = calcErr_bin(file_c_dists,file_g_dists,k,Float32)
+              resultsTime[count_p,8] = b_t
+          else
+              indxs_p = zeros(Int32,k+1,pointsQ[count_p])
+              dists_p = zeros(Float32,k+1,pointsQ[count_p])
+              if bench == true
+                  b_t = @belapsed $indxs_p, $dists_p = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,4,$in_memory)
+              else
+                  b_t = @elapsed indxs_p, dists_p = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,4,in_memory)
+              end
+              resultsAcc[count_p,8] = calcAcc(indxs_c,indxs_p)
+              resultsErr[count_p,8] = calcErr(dists_c,dists_p)
+              resultsTime[count_p,8] = b_t
+          end
+          
+         println("$(resultsTime[count_p,8]) secs")
          
          println("Comparing FLANN with GPU results")
          if in_memory == false
@@ -540,11 +670,11 @@ function batchHiggs(
        
       println("Generating result graphs")
       
-      p = plot(nam[1,:], resultsTime, title = "Performance comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "CPU" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Time (sec)", xlabel = "Points (number)",size = (1600, 1400));
+      p = plot(nam[1,:], resultsTime, title = "Performance comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Time (sec)", xlabel = "Points (number)",size = (1600, 1400));
       
-      p2 = plot(nam[1,:], resultsAcc, title = "Accuracy comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "CPU" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Accuracy (%)", xlabel = "Points (number)", size = (1600, 1400));
+      p2 = plot(nam[1,:], resultsAcc, title = "Accuracy comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Accuracy (%)", xlabel = "Points (number)", size = (1600, 1400));
       
-      p3 = plot(nam[1,:], resultsErr, title = "Error comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "CPU" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Error (std)",xlabel = "Points (number)", size = (1600, 1400));
+      p3 = plot(nam[1,:], resultsErr, title = "Error comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Error (std)",xlabel = "Points (number)", size = (1600, 1400));
       
       p4 = plot(nam[1,:], resultsBest, title = "Algorithm results comparison FLANN - GPU", label= ["FLANN (bf) wins" "GPU wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400));
       
@@ -573,11 +703,19 @@ function batchHiggs(
       indxs_g = nothing
       indxs_c = nothing
       indxs_p = nothing
+      indxs_cc = nothing
+      indxs_cg = nothing
+      indxs_rpg = nothing
+      indxs_rpc = nothing
       dists_d = nothing
       dists_a = nothing
       dists_g = nothing
       dists_c = nothing
       dists_p = nothing
+      dists_cc = nothing
+      dists_cg = nothing
+      dists_rpg = nothing
+      dists_rpc = nothing
       
       p = nothing
       p2 = nothing
@@ -591,11 +729,11 @@ function batchHiggs(
       
       @everywhere GC.gc(true)
       
-      return
+      return nothing
 end
 
 
-batchHiggs(filename_input, file_d_indxs, file_d_dists, file_a_indxs, file_a_dists, file_g_indxs, file_g_dists, file_c_indxs, file_c_dists, file_p_indxs, file_p_dists, 150,28,6400,6400,true,true)
+batchTest(filename_input, file_d_indxs, file_d_dists, file_a_indxs, file_a_dists, file_g_indxs, file_g_dists, file_c_indxs, file_c_dists, file_p_indxs, file_p_dists, 150,28,6400,6400,true,true)
 
       
       
