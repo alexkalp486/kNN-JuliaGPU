@@ -11,11 +11,14 @@ using Plots.PlotMeasures
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 filename_input = "./HIGGS.dat"
-filename_input_C = "./HIGGS_sample.dat"
-filename_input_Q = "./HIGGS_sampleQ.dat"
+#filename_input_C = "./HIGGS_sample.dat"
+#filename_input_Q = "./HIGGS_sampleQ.dat"
 
 #filename_input_C = "./SynthData_d_5000.dat"
 #filename_input_Q = "./SynthQPoints_d_5000.dat"
+
+filename_input_C = "./Synthdata_C_2800.dat"
+filename_input_Q = "./Synthdata_Q_2800.dat"
 
 file_d_indxs = "/mnt/ntfs/ProjectKNN/Higgs_d_indxs.dat"
 file_d_dists = "/mnt/ntfs/ProjectKNN/Higgs_d_dists.dat"
@@ -99,7 +102,7 @@ function calcAcc_bin(
       end
       
       szel = sizeof( dtype )
-      vecsize = (k+1) * szel
+      vecsize = k * szel
   
       n_bf = stat( filename_bf ).size ÷ vecsize
       ( stat( filename_bf ).size % vecsize ) != 0 && error("Incompatible sizes, check files.")
@@ -111,8 +114,8 @@ function calcAcc_bin(
          error("The files @filename_bf and @filename_temp have different sizes")
       end
       
-      readdata_bf = Array{dtype, 2}(undef, k+1, n_bf)
-      readdata_temp = Array{dtype, 2}(undef, k+1, n_temp)
+      readdata_bf = Array{dtype, 2}(undef, k, n_bf)
+      readdata_temp = Array{dtype, 2}(undef, k, n_temp)
       
       f_bf = open(filename_bf, "r")
       f_temp = open(filename_temp, "r")
@@ -189,7 +192,7 @@ function calcBest_bin(
       end
       
       szel = sizeof( dtype )
-      vecsize = (k+1) * szel
+      vecsize = k * szel
   
       n_bf = stat( filename_bf ).size ÷ vecsize
       ( stat( filename_bf ).size % vecsize ) != 0 && error("Incompatible sizes, check files.")
@@ -201,8 +204,8 @@ function calcBest_bin(
          error("The files @filename_bf and @filename_temp have different sizes")
       end
       
-      readdata_bf = Array{dtype, 2}(undef, k+1, n_bf)
-      readdata_temp = Array{dtype, 2}(undef, k+1, n_temp)
+      readdata_bf = Array{dtype, 2}(undef, k, n_bf)
+      readdata_temp = Array{dtype, 2}(undef, k, n_temp)
       
       f_bf = open(filename_bf, "r")
       f_temp = open(filename_temp, "r")
@@ -218,7 +221,7 @@ function calcBest_bin(
       best_tie = 0
       
       for i in 1:n_bf
-         for j in 2:(k+1)
+         for j in 2:k
              if isapprox(readdata_bf[j,i], readdata_temp[j,i]; atol = 1e-5)
                 best_tie += 1
              elseif readdata_bf[j,i] < readdata_temp[j,i]
@@ -278,7 +281,7 @@ function calcErr_bin(
       end
       
       szel = sizeof( dtype )
-      vecsize = (k+1) * szel
+      vecsize = k * szel
   
       n_bf = stat( filename_bf ).size ÷ vecsize
       ( stat( filename_bf ).size % vecsize ) != 0 && error("Incompatible sizes, check files.")
@@ -294,8 +297,8 @@ function calcErr_bin(
       f_temp = open(filename_temp, "r")
       
       distErr = zeros(Float64, n_bf)
-      readdata_bf = Array{dtype, 2}(undef, k+1, n_bf)
-      readdata_temp = Array{dtype, 2}(undef, k+1, n_temp)
+      readdata_bf = Array{dtype, 2}(undef, k, n_bf)
+      readdata_temp = Array{dtype, 2}(undef, k, n_temp)
       
       read!(f_bf, readdata_bf)
       read!(f_temp, readdata_temp)
@@ -350,7 +353,7 @@ function batchTest(
       in_memory::Bool = false
       )
 
-      nPoints = 6
+      nPoints = 4
       nAlg = 8
       
       resultsAcc = zeros(Float64, nPoints,nAlg)
@@ -362,20 +365,20 @@ function batchTest(
       resultsBest3 = zeros(Float64, nPoints,nAlg)
       resultsBest4 = zeros(Float64, nPoints,nAlg)
       
-      pointsC = [10000 25000 50000 100000 150000 200000]
+      pointsC = [10000 25000 50000 100000]
       if filename_input_C == filename_input_Q
-         pointsQ = [10000 25000 50000 100000 150000 200000]
+         pointsQ = [10000 25000 50000 100000]
       else
-         pointsQ = [2500 5000 10000 20000 30000 40000 50000]
+         pointsQ = [2500 5000 10000 20000]
       end
       
-      nam = ["10000" "25000" "50000" "100000" "150000" "200000"]
+      nam = ["10000" "25000" "50000" "100000"]
       alg = ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"]
       pal = palette(:Paired_8)
       
       
       cid = 1
-      for count_p in 1:3     
+      for count_p in 1:nPoints     
           println("=========================================")
           println("\t Starting loop for $(pointsC[count_p]) Corpus points and $(pointsQ[count_p]) Query points")
           println("=========================================")
@@ -391,8 +394,8 @@ function batchTest(
               resultsErr[count_p,4] = 0.0
               resultsTime[count_p,4] = b_t
           else
-              indxs_c = zeros(Int32,k+1,pointsQ[count_p])
-              dists_c = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_c = zeros(Int32,k,pointsQ[count_p])
+              dists_c = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_c, $dists_c = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,3,$in_memory)
               else
@@ -418,8 +421,8 @@ function batchTest(
               resultsErr[count_p,1] = calcErr_bin(file_c_dists,file_d_dists,k,Float32)
               resultsTime[count_p,1] = b_t
           else
-              indxs_d = zeros(Int32,k+1,pointsQ[count_p])
-              dists_d = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_d = zeros(Int32,k,pointsQ[count_p])
+              dists_d = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_d, $dists_d = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,0,$in_memory)
               else
@@ -447,8 +450,8 @@ function batchTest(
               resultsErr[count_p,2] = calcErr_bin(file_c_dists,file_a_dists,k,Float32)
               resultsTime[count_p,2] = b_t
           else
-              indxs_a = zeros(Int32,k+1,pointsQ[count_p])
-              dists_a = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_a = zeros(Int32,k,pointsQ[count_p])
+              dists_a = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_a, $dists_a = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,1,$in_memory)
               else
@@ -475,8 +478,8 @@ function batchTest(
               resultsErr[count_p,3] = calcErr_bin(file_c_dists,file_g_dists,k,Float32)
               resultsTime[count_p,3] = b_t
           else
-              indxs_g = zeros(Int32,k+1,pointsQ[count_p])
-              dists_g = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_g = zeros(Int32,k,pointsQ[count_p])
+              dists_g = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_g, $dists_g = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,2,$in_memory)
               else
@@ -503,8 +506,8 @@ function batchTest(
               resultsErr[count_p,4] = calcErr_bin(file_c_dists,file_rpg_dists,k,Float32)
               resultsTime[count_p,4] = b_t
           else
-              indxs_rpg = zeros(Int32,k+1,pointsQ[count_p])
-              dists_rpg = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_rpg = zeros(Int32,k,pointsQ[count_p])
+              dists_rpg = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_rpg, $dists_rpg = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,6,$in_memory,$r,$P)
               else
@@ -532,8 +535,8 @@ function batchTest(
               resultsErr[count_p,5] = calcErr_bin(file_c_dists,file_rpc_dists,k,Float32)
               resultsTime[count_p,5] = b_t
           else
-              indxs_rpc = zeros(Int32,k+1,pointsQ[count_p])
-              dists_rpc = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_rpc = zeros(Int32,k,pointsQ[count_p])
+              dists_rpc = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_rpc, $dists_rpc = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,5,$in_memory,$r,$P)
               else
@@ -558,8 +561,8 @@ function batchTest(
               resultsErr[count_p,6] = calcErr_bin(file_c_dists,file_cg_dists,k,Float32)
               resultsTime[count_p,6] = b_t
           else
-              indxs_cg = zeros(Int32,k+1,pointsQ[count_p])
-              dists_cg = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_cg = zeros(Int32,k,pointsQ[count_p])
+              dists_cg = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_cg, $dists_cg = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,8,$in_memory)
               else
@@ -587,8 +590,8 @@ function batchTest(
               resultsErr[count_p,7] = calcErr_bin(file_c_dists,file_cc_dists,k,Float32)
               resultsTime[count_p,7] = b_t
           else
-              indxs_cc = zeros(Int32,k+1,pointsQ[count_p])
-              dists_cc = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_cc = zeros(Int32,k,pointsQ[count_p])
+              dists_cc = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_cc, $dists_cc = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,7,$in_memory)
               else
@@ -614,8 +617,8 @@ function batchTest(
               resultsErr[count_p,8] = calcErr_bin(file_c_dists,file_g_dists,k,Float32)
               resultsTime[count_p,8] = b_t
           else
-              indxs_p = zeros(Int32,k+1,pointsQ[count_p])
-              dists_p = zeros(Float32,k+1,pointsQ[count_p])
+              indxs_p = zeros(Int32,k,pointsQ[count_p])
+              dists_p = zeros(Float32,k,pointsQ[count_p])
               if bench == true
                   b_t = @belapsed $indxs_p, $dists_p = distributedKNN($filename_input_C,$filename_input_Q,$k,$d, $pointsC[$count_p],$pointsQ[$count_p],$C_size,$Q_size,4,$in_memory)
               else
