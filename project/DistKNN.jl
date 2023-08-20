@@ -597,63 +597,6 @@ end
                return
 end
 
-function GPUlargeKNN(
-              Q::AbstractArray{Float32}, 
-              C::AbstractArray{Float32}, 
-              k::Int
-              )
-               
-              nQ = size(Q,2)
-              nC = size(C,2)
-              d = size(C,1)
-              
-              startP = 1
-              stopP = nQ
-              
-              if size(Q,1) != d
-                 println("The Query and Corpus arrays have mismatching dimensions")
-                 return
-              end
-               
-               tempIndex = zeros(Int64,nC,nQ)
-               tempDist = zeros(Float32,nC,nQ)
-               
-               distance = zeros(Float32,nC,nQ)
-               distance_d = CuArray(distance)
-               Q_d = CuArray(Q)
-               C_d = CuArray(C)
-               
-               indxs = zeros(Int64,k,nQ)
-               dsts = zeros(Float32,k,nQ)
-               
-               #FullEuclDistGPU_wrapper(X_d,distance_d,startP,stopP,n,d)
-               euclDistGPU_wrapper!(Q_d,C_d,distance_d,nQ,nC,d,startP,stopP,1)
-               
-               copyto!(distance, distance_d)
-               
-               CUDA.unsafe_free!(distance_d)
-               CUDA.unsafe_free!(Q_d)
-               CUDA.unsafe_free!(C_d)
-               
-               
-               @inbounds @views for i in 1:nQ
-                     #tempIndex[1:nC,i] .= 1:nC
-             
-                     tempIndex[1:k,i] = fast_sortperm(distance[1:nC,i],k)
-                     
-                     #partialsortperm!(tempIndex[1:nC,i],distance[1:nC,i],1:k,initialized=true)
-                     #tempDist[1:k,i] .= distance[tempIndex[1:k,i],i]
-                     for j in 1:k
-                         tempDist[j,i] = distance[tempIndex[j,i],i]
-                     end
-                    
-                    end   
-              @inbounds @views indxs[1:k,1:nQ] .= tempIndex[1:k,1:nQ]
-              @inbounds @views dsts[1:k,1:nQ] .= tempDist[1:k,1:nQ]
-               return indxs, dsts
-       end
-
-
 @inbounds function euclDistGPUb_filter(
             Q_d, 
             C_d, 
@@ -683,6 +626,7 @@ function GPUlargeKNN(
 			end
             return
 end
+
 
 @inline function euclDistGPU_filter_wrapper!(
                Q_d, 
@@ -757,37 +701,6 @@ end
         return
 end
 
-@inbounds function euclDistFromCenGPU(
-            Q_d, 
-            C_d, 
-            Distance_d,
-            assignments_d,            
-            nQ::Int, 
-            nC::Int, 
-            d::Int
-            )
-		    xIndex = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-            yIndex = (blockIdx().y - 1) * blockDim().y + threadIdx().y
-            
-            
-            
-            if (xIndex <= nC) && (yIndex <= nQ)
-                 if(assignments_d[xIndex]!= yIndex)
-                     Distance_d[xIndex,yIndex] = typemax(Float32)
-               
-                 else
-                 
-                     tempDist = 0.0f0
-                     
-                     @inbounds for j in 1:d
-                       tempDist += (Q_d[j,yIndex] - C_d[j,xIndex])^2
-                     end
-                     @inbounds Distance_d[xIndex,yIndex] = tempDist
-                 end
-			end
-            return
-end
-
 @inline function euclDistFromCenGPU_wrapper!(
                Q_d, 
                C_d, 
@@ -831,6 +744,34 @@ end
                kernel(Q_d, C_d, Distance_d, assignments_d, NQ, NC, d; threads=blockSizeRect, blocks=nblRect)
                 
                return
+end
+
+@inline function euclDistFromCen(
+        Q::AbstractArray{Float32},
+        C::AbstractArray{Float32},
+        Distance::AbstractArray{Float32},
+        assignments::Vector{Int32},
+        pointQ::Int, 
+        nC::Int, 
+        d::Int
+        )
+        
+        @inbounds for j in 1:nC
+            if(assignments[j]!=pointQ)
+               Distance[j,pointQ] = typemax(Float32)
+               
+               continue
+            end
+            
+            tempDist = 0.0f0
+
+            @inbounds for k in 1:d
+                tempDist += (Q[k,pointQ] - C[k,j])^2
+            end
+
+            @inbounds Distance[j,pointQ] = tempDist
+            end
+        return
 end
 
 function cenTI_filter(
@@ -1134,7 +1075,6 @@ function cenTI_filter_GPU(
              aC = assignments(clstC)
              MC = clstC.centers
 
-             #return TI_filter_GPU(C,Q,d,k,MC,aC,MQ,aQ)
              return TI_filter(C,Q,d,k,MC,aC,MQ,aQ)
 end
 
@@ -1153,191 +1093,8 @@ function cenTI_filter_GPU(
              
              MC, ac = cenTI_cluster(C, d, k)
              
-             #return TI_filter_GPU(C,Q,d,k,MC,aC,MQ,aQ)
              return TI_filter(C,Q,d,k,MC,aC,MQ,aQ)
 end
-
-
-function TI_filter_GPU(
-             C::AbstractArray,
-             Q::AbstractArray,
-             d::Int,
-             k::Int,
-             MC,
-             aC,
-             MQ,
-             aQ
-             )
-             
-             cSize = size(C,2)
-             qSize = size(Q,2)
-             
-             distance = zeros(Float32,cSize,qSize)
-             tempIndex = zeros(Int32,cSize,qSize)
-             
-             clSizeC = 3 * Int(ceil(sqrt(cSize)))
-             clSizeQ = 3 * Int(ceil(sqrt(qSize)))
-             
-             checkList = zeros(Int32, cSize,qSize)
-             
-             idxs_cen = zeros(Int32, clSizeC, clSizeQ)
-             dist_cen = zeros(Float32, clSizeC, clSizeQ)
-             distance_cen = zeros(Float32, clSizeC, clSizeQ)
-             tIndx_cen = zeros(Int32,clSizeC, clSizeQ)
-             
-             maxDist_Q = zeros(Float32, 1, clSizeQ)
-             distfromCen_Q = zeros(Float32, qSize, clSizeQ)
-             
-             maxDist_C = zeros(Float32, 1, clSizeC)
-             distance_c = zeros(Float32, cSize, clSizeC)
-             distfromCen_C = zeros(Float32, cSize, clSizeC)
-             idxsfromCen_C = zeros(Int32, cSize, clSizeC)
-             tIndxfromCen_C = zeros(Int32,cSize, clSizeC)
-             
-             Q_d = CuArray(Q)
-             C_d = CuArray(C)
-             
-             MQ_d = CuArray(MQ)
-             MC_d = CuArray(MC)
-             
-             distance_cen_d = CuArray(distance_cen)
-             distfromCen_Q_d = CuArray(distfromCen_Q)
-             distance_c_d = CuArray(distance_c)
-             aQ_d = CuArray(aQ)
-             aC_d = CuArray(aC)
-             
-             #Calculate distances between cluster centers for Q and C           
-             CUDA.@sync euclDistGPU_wrapper!(MQ_d,MC_d,distance_cen_d,clSizeQ,clSizeC,d,clSizeQ,clSizeC,2) 
-             
-             copyto!(distance_cen, distance_cen_d)
-             @inbounds @views Threads.@threads for l in 1:clSizeQ                   
-                 idxs_cen[1:clSizeC,l] .= sortperm!(tIndx_cen[1:clSizeC,l],distance_cen[1:clSizeC,l],initialized=false)
-                 dist_cen[1:clSizeC,l] .= distance_cen[idxs_cen[1:clSizeC,l],l]
-                    
-                 nothing
-             end
-             
-             #Calculate distance of points of Q from their cluster centers and keep the max too
-             CUDA.@sync euclDistFromCenGPU_wrapper!(MQ_d,Q_d,distfromCen_Q_d,aQ_d,clSizeQ,qSize,d,clSizeQ,qSize,2)
-             
-             copyto!(distfromCen_Q, distfromCen_Q_d)
-             @inbounds @views Threads.@threads for l in 1:clSizeQ
-                 maxDist_Q[l] = maximum(distfromCen_Q[1:qSize,l])
-                    
-                 nothing
-             end
-             
-             #Calculate distance of points of C from their cluster centers
-             CUDA.@sync euclDistFromCenGPU_wrapper!(MC_d,C_d,distance_c_d,aC_d,clSizeC,cSize,d,clSizeC,cSize,2)
-             
-             copyto!(distance_c, distance_c_d)
-             @inbounds @views Threads.@threads for l in 1:clSizeC                
-                 idxsfromCen_C[1:cSize,l] .= sortperm!(tIndxfromCen_C[1:cSize,l],distance_c[1:cSize,l],rev = true,initialized=false)
-                 distfromCen_C[1:cSize,l] .= distance_c[idxsfromCen_C[1:cSize,l],l]
-                 maxDist_C[l] = distfromCen_C[1,l]
-                    
-                 nothing
-             end
-             
-             kmax = min(k, cSize)
-             candidateList = zeros(Int32, clSizeC, clSizeQ)
-             upperBounds = zeros(Float32, kmax, clSizeC, clSizeQ)
-             UBvec = zeros(Float32, kmax * clSizeC)
-             qUB = zeros(Float32, 1, clSizeQ)
-             
-             #calculate upper bounds for all query clusters
-             @inbounds @views Threads.@threads for l in 1:clSizeQ
-                for j in 1:clSizeC
-                   for i in 1:kmax
-                       upperBounds[i,j,l] = maxDist_Q[l] + dist_cen[j,l] + distfromCen_C[max(cSize - i + 1,1),j]
-                   end
- 
-                end
-                UBvec .= reshape(upperBounds[1:kmax,1:clSizeC,l], kmax * clSizeC)
-               sort(UBvec)
-               qUB[l] = UBvec[kmax]
-             
-                nothing
-             end
-             
-             lowerBounds = zeros(Float32, clSizeC, clSizeQ)
-             clusterList = ones(Int32, clSizeC, clSizeQ)
-             candidateList = zeros(Int32, cSize, qSize)
-             
-             #create the filter list of target clusters too far from each query clusters
-             # if 0 it's too far              
-             @inbounds @views Threads.@threads for l in 1:clSizeQ
-                for j in 1:clSizeC
-                    lowerBounds[j,l] = dist_cen[j,l] - maxDist_Q[l] - maxDist_C[j]
-                    if( qUB[l] < lowerBounds[j,l])
-                        clusterList[j,l] = 0
-                    end
-                    
-                end
-             
-                nothing
-             end
-             
-             @inbounds @views Threads.@threads for w in 1:qSize
-                for z in 1:cSize
-                    #if (clusterList[aC[z],aQ[w]] !=0)
-                    if (clusterList[aC[z],aQ[w]] !=0) && (abs(dist_cen[aC[z],aQ[w]] - distfromCen_C[z,aC[z]]) <= qUB[aQ[w]]) 
-                       candidateList[z,w] += 1
-                    end
-
-                end
-                
-                nothing
-            end
-            
-            
-             CUDA.unsafe_free!(Q_d)
-             CUDA.unsafe_free!(C_d)
-             
-             CUDA.unsafe_free!(MQ_d)
-             CUDA.unsafe_free!(MC_d)
-             
-             CUDA.unsafe_free!(distance_cen_d)
-             CUDA.unsafe_free!(distfromCen_Q_d)
-             CUDA.unsafe_free!(distance_c_d)
-             CUDA.unsafe_free!(aQ_d)
-             CUDA.unsafe_free!(aC_d)
-                
-            @sync begin
-                distance = nothing
-                tempIndex = nothing
-                checkList = nothing
-                
-                idxs_cen = nothing
-                dist_cen = nothing
-                distance_cen = nothing
-                tIndx_cen = nothing
-                maxDist_Q = nothing
-                distfromCen_Q = nothing
-                maxDist_C = nothing
-                distance_c = nothing
-                distfromCen_C = nothing
-                idxsfromCen_C = nothing
-                tIndxfromCen_C = nothing
-                clstQ = nothing
-                aQ = nothing
-                MQ = nothing
-                clstC = nothing
-                aC = nothing
-                MC = nothing
-                upperBounds = nothing
-                UBvec = nothing
-                qUB = nothing
-                lowerBounds = nothing
-                clusterList = nothing
-            end
-
-            #GC.gc(true)
-            
-            return candidateList
-end
-
-
 
 
 @inbounds function euclDist_filter(
@@ -2162,87 +1919,6 @@ function distPointParKNN(
                
                GC.gc()
             end            
-      
-      return (idxs_out , dist_out)
-end
-
-
-function runHiggsKNN_GPU(
-      filename_input::String,
-      k::Int, 
-      d::Int = 28, 
-      n::Int = 11000000, 
-      cSize::Int = 100000, 
-      qSize::Int = 11000
-      )
-      
-      data = load_file(filename_input, d, n)
-      n = size(data, 2)
-      d = size(data, 1)
-
-      
-      C = zeros(Float32, d, cSize)
-      Q = zeros(Float32, d, qSize)
-       
-      idxs = zeros(Int64, k, qSize)
-      dist = zeros(Float32, k, qSize)     
-      
-      idxs_seg = zeros(Int64, k, qSize)
-      dist_seg = zeros(Float32, k, qSize)
-      
-      idxs_out = zeros(Int64, k, n)
-      dist_out = zeros(Float32, k, n)
-      
-      cStart = 1
-      cStop = cSize
-      cEnd = cSize
-      
-      qStart = 1
-      qStop = qSize
-      qElapsed = 1
-      cOff = 0      
-      println("qStart $qStart , qStop $qStop , qBlock $qBlock , Q $(size(Q,1) ) x $(size(Q,2) )")
-     
-      #@inbounds for i in 1:qBlock
-      @inbounds for i in 1:qBlock
-         Q[:,1:qSize] .= data[:,qStart:qStop]
-            
-         cStart = 1
-         cStop = cSize
-         cOff = cStart - 1         
-         
-         @inbounds for j in 1:cBlock
-            C[:,1:cSize] .= data[:,cStart:cStop]
-            
-            cOff = cStart - 1 
-            
-            idxs_seg[:,1:qSize], dist_seg[:,1:qSize] = GPUlargeKNN(Q, C, k);
-           
-            
-            addOffset!(idxs_seg, 1, qSize, cOff)
-            
-            if j > 1
-               mergeSeg!(idxs, dist, idxs_seg, dist_seg)
-            else
-               idxs[:,:] .= idxs_seg[:,:]
-               dist[:,:] .= dist_seg[:,:]
-            end
-            
-            cStart = cStop + 1
-            cStop = min(cStop + cSize, n)
-            cEnd = cStop - cStart + 1
-            
-            
-         end
-         
-        @views idxs_out[:,qStart:qStop] .= idxs[:,1:qSize]
-        @views dist_out[:,qStart:qStop] .= dist[:,1:qSize]
-         
-         println("Done $i segments out of $qBlock")
-         qStart = qStop + 1
-         qStop = min(qStop + qSize, n)
-         
-      end
       
       return (idxs_out , dist_out)
 end
@@ -3588,192 +3264,6 @@ function distPointKNN(
       return (idxs_out , dist_out)
 end
 
-function runHiggsKNN(
-      filename_input::String,
-      k::Int, 
-      d::Int = 28, 
-      n::Int = 11000000, 
-      cSize::Int = 100000, 
-      qSize::Int = 11000, 
-      bf::Bool = true
-      )
-
-      cBlock = ceil(Int32, n/cSize)
-      qBlock = ceil(Int32, n/qSize)
-      
-      C = zeros(Float32, d, cSize)
-      Q = zeros(Float32, d, qSize)
-      
-      idxs = zeros(Int32, k, qSize)
-      dist = zeros(Float32, k, qSize)
-      
-      idxs_seg = similar(idxs)
-      dist_seg = similar(dist)
-      
-      idxs_out = zeros(Int32, k, n)
-      dist_out = zeros(Float32, k, n)
-      
-      cStart = 1
-      cStop = cSize
-      cEnd = cSize
-      
-      qStart = 1
-      qStop = qSize
-      qLocStart = 1
-      qLocStop = qSize
-      cOff = 0      
-      println("qStart $qStart , qStop $qStop , qBlock $qBlock , Q $(size(Q,1) ) x $(size(Q,2) )")
-     
-      @inbounds for i in 1:qBlock    
-         load_file_wrapper!(filename_input,d,Q, qStart:qStop)
-            
-         cStart = 1
-         cStop = cSize
-         cOff = cStart - 1         
-         
-         @inbounds @views for j in 1:cBlock
-            load_file_wrapper!(filename_input,d,C, cStart:cStop)
-            
-            cOff = cStart - 1 
-            
-            if bf == true
-               knn!(C[:,1:length(cStart:cStop)], Q[:,1:length(qStart:qStop)], k, FLANNParameters(algorithm=0), idxs_seg, dist_seg);
-            else
-               knn!(C[:,1:length(cStart:cStop)], Q[:,1:length(qStart:qStop)], k, FLANNParameters(algorithm=4, trees=16,leaf_max_size=64,branching=32,iterations=14,centers_init=0,cb_index=0.2), idxs_seg, dist_seg);
-            end
-           
-            
-            addOffset!(idxs_seg, 1, qSize, cOff)
-            
-            if j > 1
-              mergeSeg!(idxs, dist, idxs_seg, dist_seg)
-            else
-              copy2dArr!(idxs, idxs_seg)
-              copy2dArr!(dist, dist_seg)
-            end
-            
-            cStart = cStop + 1
-            cStop = min(cStop + cSize, n)
-            cEnd = cStop - cStart + 1
-       
-         end
-         
-         if (qLocStop - qLocStart) == (qSize - 1)
-            copy2dArrPart!(idxs_out,qLocStart,qLocStop,idxs,1,qSize)
-            copy2dArrPart!(dist_out,qLocStart,qLocStop,dist,1,qSize)
-         else
-            lcount = 1
-            @inbounds for z in qLocStart:qLocStop
-                         for w in 1:k
-                            idxs_out[w,z] = idxs[w,lcount]
-                            dist_out[w,z] = dist[w,lcount]
-                         end
-                         lcount += 1
-                      end
-         end
-       
-         println("Done $i segments out of $qBlock")
-         qStart = qStop + 1
-         qStop = min(qStop + qSize, n)
-         
-         qLocStart = qLocStop + 1
-         qLocStop = min(qLocStop + qSize, n)
-         
-         GC.gc()
-         
-      end
-      
-      return (idxs_out , dist_out)
-end
-
-
-
-function runHiggsKNN_CPU(
-      filename_input::String,
-      k::Int, 
-      d::Int = 28, 
-      n::Int = 11000000, 
-      cSize::Int = 100000, 
-      qSize::Int = 11000
-      )
-      
-      data = load_file(filename_input, d, n)
-      n = size(data, 2)
-      d = size(data, 1)
-
-      cBlock = ceil(Int64, n/cSize)
-      qBlock = ceil(Int64, n/qSize)
-      
-      C = zeros(Float32, d, cSize)
-      Q = zeros(Float32, d, qSize)
-     
-      idxs = zeros(Int64, k, qSize)
-      dist = zeros(Float32, k, qSize)
-      
-      idxs_seg = zeros(Int64, k, qSize)
-      dist_seg = zeros(Float32, k, qSize)
-      
-      idxs_out = zeros(Int64, k, b)
-      dist_out = zeros(Float32, k, b)
-      
-      cStart = 1
-      cStop = cSize
-      cEnd = cSize
-      
-      qStart = 1
-      qStop = qSize
-      qElapsed = 1
-      cOff = 0      
-      println("qStart $qStart , qStop $qStop , qBlock $qBlock , Q $(size(Q,1) ) x $(size(Q,2) )")
-     
-      #@inbounds for i in 1:qBlock
-      @inbounds for i in 1:qBlock
-         Q[:,1:qSize] .= data[:,qStart:qStop]
-            
-         cStart = 1
-         cStop = cSize
-         cOff = cStart - 1         
-         
-         @inbounds for j in 1:cBlock
-            C[:,1:cSize] .= data[:,cStart:cStop]
-            
-            cOff = cStart - 1 
-            
-            idxs_seg[:,1:qSize], dist_seg[:,1:qSize] = GPUlargeKNN(Q, C, k);
-           
-            
-            addOffset!(idxs_seg, 1, qSize, cOff)
-            
-            #println("qStart $qStart, qStop $qStop, cOff $cOff")
-            
-            if j > 1
-               mergeSeg!(idxs, dist, idxs_seg, dist_seg)
-            else
-               idxs[:,:] .= idxs_seg[:,:]
-               dist[:,:] .= dist_seg[:,:]
-            end
-            
-            cStart = cStop + 1
-            cStop = min(cStop + cSize, n)
-            cEnd = cStop - cStart + 1
-            
-            
-         end
-         
-        @views idxs_out[:,qStart:qStop] .= idxs[:,1:qSize]
-        @views dist_out[:,qStart:qStop] .= dist[:,1:qSize]
-         
-         println("Done $i segments out of $qBlock")
-         qStart = qStop + 1
-         qStop = min(qStop + qSize, n)
-         
-      end
-      
-      return (idxs_out , dist_out)
-      #return (idxs , dist)
-
-end
-
 function distPointKNN_CPU(
              progress::RemoteChannel, 
              filenameC::String,             
@@ -4819,8 +4309,11 @@ function distributedKNN(
          qSize = b
       end
       
-      numJobs = ceil(Int32, nQ/qSize)
+      #numJobs = ceil(Int32, nQ/qSize)
+      numJobs = ceil(Int32, b/qSize) * nw
       progress = RemoteChannel(()->Channel{Tuple}(numJobs));
+      
+      jobBounds = []
       
       GPUs = Int(length(devices()))
       gpuID = 0
@@ -4835,7 +4328,7 @@ function distributedKNN(
       println(" Total number of job segments: $numJobs")
       
       #@sync begin
-      jobCount = numJobs
+      jobCount = min(numJobs, nw)
       
       startP = 1
       stopP = b
@@ -4910,6 +4403,7 @@ function distributedKNN(
          end
          
          push!(placeholders,pl)
+         push!(jobBounds, (startP,stopP))
          
          if jobCount == 0 
              break
@@ -4951,6 +4445,8 @@ function distributedKNN(
                #      println(ex)
                #end
                
+               locStart, locStop = popfirst!(jobBounds)
+               
                jobCount -= 1
                
                load_bin_segment_file!(filename_indxs, k, idxs_seg, 1:b, Int32)
@@ -4963,8 +4459,11 @@ function distributedKNN(
                   rm(filename_dists)
                end
                
-               nearestKN[1:k,startP:stopP] .= idxs_seg[1:k,:]
-               distsKN[1:k,startP:stopP] .= dist_seg[1:k,:]
+               #nearestKN[1:k,startP:stopP] .= idxs_seg[1:k,:]
+               #distsKN[1:k,startP:stopP] .= dist_seg[1:k,:]
+               
+               nearestKN[1:k,locStart:locStop] .= idxs_seg[1:k,:]
+               distsKN[1:k,locStart:locStop] .= dist_seg[1:k,:]
                
                if jobCount == 0 
                   break
@@ -4981,10 +4480,15 @@ function distributedKNN(
                      println(ex)
                end
                
+               locStart, locStop = popfirst!(jobBounds)
+               
                jobCount -= 1
                
-               nearestKN[1:k,startP:stopP] .= idxs_seg[1:k,:]
-               distsKN[1:k,startP:stopP] .= dist_seg[1:k,:]
+               #nearestKN[1:k,startP:stopP] .= idxs_seg[1:k,:]
+               #distsKN[1:k,startP:stopP] .= dist_seg[1:k,:]
+               
+               nearestKN[1:k,locStart:locStop] .= idxs_seg[1:k,:]
+               distsKN[1:k,locStart:locStop] .= dist_seg[1:k,:]
                
                if jobCount == 0 
                   break
@@ -5043,7 +4547,8 @@ function distributedKNN(
          qSize = b
       end
       
-      numJobs = ceil(Int32, nQ/qSize)
+      #numJobs = ceil(Int32, nQ/qSize)
+      numJobs = ceil(Int32, b/qSize) * nw
       progress = RemoteChannel(()->Channel{Tuple}(numJobs));
       
       if isfile(file_indxs_out)
@@ -5065,7 +4570,7 @@ function distributedKNN(
       end
       println(" Total number of job segments: $numJobs")
       
-      jobCount = numJobs
+      jobCount = min(numJobs, nw)
       
       #@sync begin
       startP = 1

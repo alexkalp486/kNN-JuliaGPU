@@ -1,5 +1,5 @@
 ENV["GKSwstype"] = "nul"
-using FLANN, BenchmarkTools, Statistics, Distributed, DelimitedFiles, CUDA, Plots
+using FLANN, BenchmarkTools, Statistics, Distributed, DelimitedFiles, CUDA, Plots, ColorSchemes
 using Plots.PlotMeasures
 
 using SharedArrays, Printf
@@ -332,6 +332,342 @@ end
 # ~~~                 Testing code
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+function batchWarmup(
+      filename_input_C::String,
+      filename_input_Q::String,
+      file_d_indxs::String,
+      file_d_dists::String,
+      file_a_indxs::String,
+      file_a_dists::String,
+      file_g_indxs::String,
+      file_g_dists::String,
+      file_c_indxs::String,
+      file_c_dists::String,
+      file_p_indxs::String,
+      file_p_dists::String,
+      file_cc_indxs::String,
+      file_cc_dists::String,
+      file_cg_indxs::String,
+      file_cg_dists::String,
+      file_rpc_indxs::String,
+      file_rpc_dists::String,
+      file_rpg_indxs::String,
+      file_rpg_dists::String,
+      k::Int = 150, 
+      d::Int = 28,
+      r::Int = 3,
+      P::Int = 5,
+      C_size:: Int = 10000,
+      Q_size::Int = 5000,
+      bench::Bool = false,
+      in_memory::Bool = false
+      )
+
+      nPoints = 4
+      nAlg = 9
+      
+      resultsAcc = zeros(Float64, nPoints,nAlg)
+      resultsErr = zeros(Float64, nPoints,nAlg)
+      resultsTime = zeros(Float64, nPoints,nAlg)
+      
+      resultsBest = zeros(Float64, nPoints,nAlg)
+      resultsBest2 = zeros(Float64, nPoints,nAlg)
+      resultsBest3 = zeros(Float64, nPoints,nAlg)
+      resultsBest4 = zeros(Float64, nPoints,nAlg)
+      
+      pointsC = 1000
+      if filename_input_C == filename_input_Q
+         pointsQ = 1000
+      else
+         pointsQ = 250
+      end
+      
+      count_p = 1
+      
+      
+      cid = 1
+
+      println("=========================================")
+      println("\t Starting loop for $(pointsC[count_p]) Corpus points and $(pointsQ[count_p]) Query points")
+      println("=========================================")
+      
+      println("\nCalculating cpu results")
+     if in_memory == false
+
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_c_indxs,file_c_dists,k,d, pointsC,pointsQ,C_size,Q_size,3,in_memory)
+          
+          resultsAcc[count_p,4] = 100.0
+          resultsErr[count_p,4] = 0.0
+          resultsTime[count_p,4] = b_t
+      else
+          indxs_c = zeros(Int32,k,pointsQ)
+          dists_c = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_c, dists_c = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,3,in_memory)
+          
+          resultsAcc[count_p,4] = 100.0
+          resultsErr[count_p,4] = 0.0
+          resultsTime[count_p,4] = b_t
+      end
+      
+     println("$(resultsTime[count_p,4]) secs")
+     
+     @everywhere GC.gc(true)
+     
+      println("\nCalculating FLANN brute force results")
+      if in_memory == false
+          
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_d_indxs,file_d_dists,k,d, pointsC,pointsQ,C_size,Q_size,0,in_memory)
+          
+          resultsAcc[count_p,1] = calcAcc_bin(file_c_indxs,file_d_indxs,k,Int32)
+          resultsErr[count_p,1] = calcErr_bin(file_c_dists,file_d_dists,k,Float32)
+          resultsTime[count_p,1] = b_t
+      else
+          indxs_d = zeros(Int32,k,pointsQ)
+          dists_d = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_d, dists_d = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,0,in_memory)
+         
+          resultsAcc[count_p,1] = calcAcc(indxs_c,indxs_d)
+          resultsErr[count_p,1] = calcErr(dists_c,dists_d)
+          resultsTime[count_p,1] = b_t
+      end
+      
+
+      println("$(resultsTime[count_p,1]) secs")
+  
+  
+     @everywhere GC.gc(true)
+  
+     println("\nCalculating FLANN approximated results")
+     if in_memory == false
+          
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_a_indxs,file_a_dists,k,d, pointsC,pointsQ,C_size,Q_size,1,in_memory)
+          
+          resultsAcc[count_p,2] = calcAcc_bin(file_c_indxs,file_a_indxs,k,Int32)
+          resultsErr[count_p,2] = calcErr_bin(file_c_dists,file_a_dists,k,Float32)
+          resultsTime[count_p,2] = b_t
+      else
+          indxs_a = zeros(Int32,k,pointsQ)
+          dists_a = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_a, dists_a = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,1,in_memory)
+         
+          resultsAcc[count_p,2] = calcAcc(indxs_c,indxs_a)
+          resultsErr[count_p,2] = calcErr(dists_c,dists_a)
+          resultsTime[count_p,2] = b_t
+      end
+      
+     println("$(resultsTime[count_p,2]) secs")
+  
+  
+     @everywhere GC.gc(true)
+  
+     println("\nCalculating brute force gpu results")
+     if in_memory == false
+          
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_g_indxs,file_g_dists,k,d, pointsC,pointsQ,C_size,Q_size,2,in_memory)
+          
+          resultsAcc[count_p,3] = calcAcc_bin(file_c_indxs,file_g_indxs,k,Int32)
+          resultsErr[count_p,3] = calcErr_bin(file_c_dists,file_g_dists,k,Float32)
+          resultsTime[count_p,3] = b_t
+      else
+          indxs_g = zeros(Int32,k,pointsQ)
+          dists_g = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_g, dists_g = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,2,in_memory)
+          
+          resultsAcc[count_p,3] = calcAcc(indxs_c,indxs_g)
+          resultsErr[count_p,3] = calcErr(dists_c,dists_g)
+          resultsTime[count_p,3] = b_t
+      end
+      
+      println("$(resultsTime[count_p,3]) secs")
+      
+     @everywhere CUDA.reclaim()
+     @everywhere GC.gc(true)
+     
+      println("\nCalculating Random Projection GPU results")
+     if in_memory == false
+          
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_rpg_indxs,file_rpg_dists,k,d, pointsC,pointsQ,C_size,Q_size,6,in_memory)
+          
+          resultsAcc[count_p,5] = calcAcc_bin(file_c_indxs,file_rpg_indxs,k,Int32)
+          resultsErr[count_p,5] = calcErr_bin(file_c_dists,file_rpg_dists,k,Float32)
+          resultsTime[count_p,5] = b_t
+      else
+          indxs_rpg = zeros(Int32,k,pointsQ)
+          dists_rpg = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_rpg, dists_rpg = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,6,in_memory,r,P)
+          
+          resultsAcc[count_p,5] = calcAcc(indxs_c,indxs_rpg)
+          resultsErr[count_p,5] = calcErr(dists_c,dists_rpg)
+          resultsTime[count_p,5] = b_t
+      end
+      
+      println("$(resultsTime[count_p,5]) secs")
+      
+     @everywhere CUDA.reclaim()
+     @everywhere GC.gc(true)
+     
+     
+     println("\nCalculating Random Projection CPU results")
+     if in_memory == false
+          
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_rpc_indxs,file_rpc_dists,k,d, pointsC,pointsQ,C_size,Q_size,5,in_memory,r,P)
+          
+          resultsAcc[count_p,6] = calcAcc_bin(file_c_indxs,file_rpc_indxs,k,Int32)
+          resultsErr[count_p,6] = calcErr_bin(file_c_dists,file_rpc_dists,k,Float32)
+          resultsTime[count_p,6] = b_t
+      else
+          indxs_rpc = zeros(Int32,k,pointsQ)
+          dists_rpc = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_rpc, dists_rpc = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,5,in_memory,r,P)
+          
+          resultsAcc[count_p,6] = calcAcc(indxs_c,indxs_rpc)
+          resultsErr[count_p,6] = calcErr(dists_c,dists_rpc)
+          resultsTime[count_p,6] = b_t
+      end
+      
+      println("$(resultsTime[count_p,6]) secs")
+      
+      
+     println("\nCalculating Cluster TI GPU results")
+     if in_memory == false
+          
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_cg_indxs,file_cg_dists,k,d, pointsC,pointsQ,C_size,Q_size,8,in_memory)
+          
+          resultsAcc[count_p,7] = calcAcc_bin(file_c_indxs,file_cg_indxs,k,Int32)
+          resultsErr[count_p,7] = calcErr_bin(file_c_dists,file_cg_dists,k,Float32)
+          resultsTime[count_p,7] = b_t
+      else
+          indxs_cg = zeros(Int32,k,pointsQ)
+          dists_cg = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_cg, dists_cg = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,8,in_memory)
+         
+          resultsAcc[count_p,7] = calcAcc(indxs_c,indxs_cg)
+          resultsErr[count_p,7] = calcErr(dists_c,dists_cg)
+          resultsTime[count_p,7] = b_t
+      end
+      
+      println("$(resultsTime[count_p,7]) secs")
+     
+     @everywhere CUDA.reclaim()
+     @everywhere GC.gc(true)          
+      
+      
+     println("\nCalculating Cluster TI CPU results")
+     if in_memory == false
+          
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_cc_indxs,file_cc_dists,k,d, pointsC,pointsQ,C_size,Q_size,7,in_memory)
+          
+          resultsAcc[count_p,8] = calcAcc_bin(file_c_indxs,file_cc_indxs,k,Int32)
+          resultsErr[count_p,8] = calcErr_bin(file_c_dists,file_cc_dists,k,Float32)
+          resultsTime[count_p,8] = b_t
+      else
+          indxs_cc = zeros(Int32,k,pointsQ)
+          dists_cc = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_cc, dists_cc = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,7,in_memory)
+          
+          resultsAcc[count_p,8] = calcAcc(indxs_c,indxs_cc)
+          resultsErr[count_p,8] = calcErr(dists_c,dists_cc)
+          resultsTime[count_p,8] = b_t
+      end
+      
+      println("$(resultsTime[count_p,8]) secs")
+
+     @everywhere GC.gc(true)           
+     
+     println("\nCalculating ParallelKNN (gpu) results")
+     if in_memory == false
+          
+          b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_p_indxs,file_p_dists,k,d, pointsC,pointsQ,C_size,Q_size,4,in_memory)
+          
+          resultsAcc[count_p,9] = calcAcc_bin(file_c_indxs,file_g_indxs,k,Int32)
+          resultsErr[count_p,9] = calcErr_bin(file_c_dists,file_g_dists,k,Float32)
+          resultsTime[count_p,9] = b_t
+      else
+          indxs_p = zeros(Int32,k,pointsQ)
+          dists_p = zeros(Float32,k,pointsQ)
+          
+          b_t = @elapsed indxs_p, dists_p = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC,pointsQ,C_size,Q_size,4,in_memory)
+          
+          resultsAcc[count_p,9] = calcAcc(indxs_c,indxs_p)
+          resultsErr[count_p,9] = calcErr(dists_c,dists_p)
+          resultsTime[count_p,9] = b_t
+      end
+      
+     println("$(resultsTime[count_p,9]) secs")
+     
+     println("Comparing FLANN with GPU results")
+     if in_memory == false
+          resultsBest[count_p,1], resultsBest[count_p,2], resultsBest[count_p,3] = calcBest_bin(file_d_dists,file_g_dists,k,Float32)
+     else
+          resultsBest[count_p,1], resultsBest[count_p,2], resultsBest[count_p,3] = calcBest(dists_d,dists_g)
+     end
+     println("Algorithm comparisons results (best): $(resultsBest[count_p,1])% FLANN, $(resultsBest[count_p,2])% GPU, $(resultsBest[count_p,3])% Tie")
+     
+     println("Comparing FLANN with CPU results")
+     if in_memory == false
+          resultsBest2[count_p,1], resultsBest2[count_p,2], resultsBest2[count_p,3] = calcBest_bin(file_d_dists,file_c_dists,k,Float32)
+     else
+          resultsBest2[count_p,1], resultsBest2[count_p,2], resultsBest2[count_p,3] = calcBest(dists_d,dists_c)
+     end
+     println("Algorithm comparisons results (best): $(resultsBest2[count_p,1])% FLANN, $(resultsBest2[count_p,2])% CPU, $(resultsBest2[count_p,3])% Tie")
+     
+     println("Comparing CPU with GPU results")
+     if in_memory == false
+          resultsBest3[count_p,1], resultsBest3[count_p,2], resultsBest3[count_p,3] = calcBest_bin(file_c_dists,file_g_dists,k,Float32)
+     else
+          resultsBest3[count_p,1], resultsBest3[count_p,2], resultsBest3[count_p,3] = calcBest(dists_c,dists_g)
+     end
+     println("Algorithm comparisons results (best): $(resultsBest3[count_p,1])% CPU, $(resultsBest3[count_p,2])% GPU, $(resultsBest3[count_p,3])% Tie")
+     
+     println("Comparing GPU with ParallelKNN results")
+     if in_memory == false
+          resultsBest4[count_p,1], resultsBest4[count_p,2], resultsBest4[count_p,3] = calcBest_bin(file_g_dists,file_p_dists,k,Float32)
+     else
+          resultsBest4[count_p,1], resultsBest4[count_p,2], resultsBest4[count_p,3] = calcBest(dists_g,dists_p)
+     end
+     println("Algorithm comparisons results (best): $(resultsBest3[count_p,1])% CPU, $(resultsBest3[count_p,2])% GPU, $(resultsBest3[count_p,3])% Tie")
+     
+     @everywhere CUDA.reclaim()
+     @everywhere GC.gc(true)
+         
+         
+
+      
+      indxs_d = nothing
+      indxs_a = nothing
+      indxs_g = nothing
+      indxs_c = nothing
+      indxs_p = nothing
+      indxs_cc = nothing
+      indxs_cg = nothing
+      indxs_rpg = nothing
+      indxs_rpc = nothing
+      dists_d = nothing
+      dists_a = nothing
+      dists_g = nothing
+      dists_c = nothing
+      dists_p = nothing
+      dists_cc = nothing
+      dists_cg = nothing
+      dists_rpg = nothing
+      dists_rpc = nothing
+      
+      b_t = nothing
+      
+      @everywhere GC.gc(true)
+      
+      return nothing
+end
+
+
 function batchTest(
       filename_input_C::String,
       filename_input_Q::String,
@@ -364,7 +700,7 @@ function batchTest(
       )
 
       nPoints = 4
-      nAlg = 8
+      nAlg = 9
       
       resultsAcc = zeros(Float64, nPoints,nAlg)
       resultsErr = zeros(Float64, nPoints,nAlg)
@@ -384,7 +720,8 @@ function batchTest(
       
       nam = ["10000" "25000" "50000" "100000"]
       alg = ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"]
-      pal = palette(:Paired_8)
+      pal = palette(:Set1_9)
+      
       
       cid = 1
       for count_p in 1:nPoints     
@@ -416,6 +753,7 @@ function batchTest(
           end
           
          println("$(resultsTime[count_p,4]) secs")
+         println("$(resultsAcc[count_p,4]) %%")
          
          @everywhere GC.gc(true)
          
@@ -444,6 +782,7 @@ function batchTest(
           
 
           println("$(resultsTime[count_p,1]) secs")
+          println("$(resultsAcc[count_p,1]) %%")
       
       
          @everywhere GC.gc(true)
@@ -472,6 +811,7 @@ function batchTest(
           end
           
          println("$(resultsTime[count_p,2]) secs")
+         println("$(resultsAcc[count_p,2]) %%")
       
       
          @everywhere GC.gc(true)
@@ -500,6 +840,7 @@ function batchTest(
           end
           
           println("$(resultsTime[count_p,3]) secs")
+          println("$(resultsAcc[count_p,3]) %%")
           
          @everywhere CUDA.reclaim()
          @everywhere GC.gc(true)
@@ -511,9 +852,9 @@ function batchTest(
               else
                   b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_rpg_indxs,file_rpg_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,6,in_memory)
               end
-              resultsAcc[count_p,4] = calcAcc_bin(file_c_indxs,file_rpg_indxs,k,Int32)
-              resultsErr[count_p,4] = calcErr_bin(file_c_dists,file_rpg_dists,k,Float32)
-              resultsTime[count_p,4] = b_t
+              resultsAcc[count_p,5] = calcAcc_bin(file_c_indxs,file_rpg_indxs,k,Int32)
+              resultsErr[count_p,5] = calcErr_bin(file_c_dists,file_rpg_dists,k,Float32)
+              resultsTime[count_p,5] = b_t
           else
               indxs_rpg = zeros(Int32,k,pointsQ[count_p])
               dists_rpg = zeros(Float32,k,pointsQ[count_p])
@@ -522,12 +863,13 @@ function batchTest(
               else
                   b_t = @elapsed indxs_rpg, dists_rpg = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,6,in_memory,r,P)
               end
-              resultsAcc[count_p,4] = calcAcc(indxs_c,indxs_rpg)
-              resultsErr[count_p,4] = calcErr(dists_c,dists_rpg)
-              resultsTime[count_p,4] = b_t
+              resultsAcc[count_p,5] = calcAcc(indxs_c,indxs_rpg)
+              resultsErr[count_p,5] = calcErr(dists_c,dists_rpg)
+              resultsTime[count_p,5] = b_t
           end
           
-          println("$(resultsTime[count_p,4]) secs")
+          println("$(resultsTime[count_p,5]) secs")
+          println("$(resultsAcc[count_p,5]) %%")
           
          @everywhere CUDA.reclaim()
          @everywhere GC.gc(true)
@@ -540,9 +882,9 @@ function batchTest(
               else
                   b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_rpc_indxs,file_rpc_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,5,in_memory,r,P)
               end
-              resultsAcc[count_p,5] = calcAcc_bin(file_c_indxs,file_rpc_indxs,k,Int32)
-              resultsErr[count_p,5] = calcErr_bin(file_c_dists,file_rpc_dists,k,Float32)
-              resultsTime[count_p,5] = b_t
+              resultsAcc[count_p,6] = calcAcc_bin(file_c_indxs,file_rpc_indxs,k,Int32)
+              resultsErr[count_p,6] = calcErr_bin(file_c_dists,file_rpc_dists,k,Float32)
+              resultsTime[count_p,6] = b_t
           else
               indxs_rpc = zeros(Int32,k,pointsQ[count_p])
               dists_rpc = zeros(Float32,k,pointsQ[count_p])
@@ -551,12 +893,13 @@ function batchTest(
               else
                   b_t = @elapsed indxs_rpc, dists_rpc = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,5,in_memory,r,P)
               end
-              resultsAcc[count_p,5] = calcAcc(indxs_c,indxs_rpc)
-              resultsErr[count_p,5] = calcErr(dists_c,dists_rpc)
-              resultsTime[count_p,5] = b_t
+              resultsAcc[count_p,6] = calcAcc(indxs_c,indxs_rpc)
+              resultsErr[count_p,6] = calcErr(dists_c,dists_rpc)
+              resultsTime[count_p,6] = b_t
           end
           
-          println("$(resultsTime[count_p,5]) secs")
+          println("$(resultsTime[count_p,6]) secs")
+          println("$(resultsAcc[count_p,6]) %%")
           
           
          println("\nCalculating Cluster TI GPU results")
@@ -566,9 +909,9 @@ function batchTest(
               else
                   b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_cg_indxs,file_cg_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,8,in_memory)
               end
-              resultsAcc[count_p,6] = calcAcc_bin(file_c_indxs,file_cg_indxs,k,Int32)
-              resultsErr[count_p,6] = calcErr_bin(file_c_dists,file_cg_dists,k,Float32)
-              resultsTime[count_p,6] = b_t
+              resultsAcc[count_p,7] = calcAcc_bin(file_c_indxs,file_cg_indxs,k,Int32)
+              resultsErr[count_p,7] = calcErr_bin(file_c_dists,file_cg_dists,k,Float32)
+              resultsTime[count_p,7] = b_t
           else
               indxs_cg = zeros(Int32,k,pointsQ[count_p])
               dists_cg = zeros(Float32,k,pointsQ[count_p])
@@ -577,12 +920,13 @@ function batchTest(
               else
                   b_t = @elapsed indxs_cg, dists_cg = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,8,in_memory)
               end
-              resultsAcc[count_p,6] = calcAcc(indxs_c,indxs_cg)
-              resultsErr[count_p,6] = calcErr(dists_c,dists_cg)
-              resultsTime[count_p,6] = b_t
+              resultsAcc[count_p,7] = calcAcc(indxs_c,indxs_cg)
+              resultsErr[count_p,7] = calcErr(dists_c,dists_cg)
+              resultsTime[count_p,7] = b_t
           end
           
-          println("$(resultsTime[count_p,6]) secs")
+          println("$(resultsTime[count_p,7]) secs")
+          println("$(resultsAcc[count_p,7]) %%")
          
          @everywhere CUDA.reclaim()
          @everywhere GC.gc(true)          
@@ -595,9 +939,9 @@ function batchTest(
               else
                   b_t = @elapsed distributedKNN(filename_input_C,filename_input_Q,file_cc_indxs,file_cc_dists,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,7,in_memory)
               end
-              resultsAcc[count_p,7] = calcAcc_bin(file_c_indxs,file_cc_indxs,k,Int32)
-              resultsErr[count_p,7] = calcErr_bin(file_c_dists,file_cc_dists,k,Float32)
-              resultsTime[count_p,7] = b_t
+              resultsAcc[count_p,8] = calcAcc_bin(file_c_indxs,file_cc_indxs,k,Int32)
+              resultsErr[count_p,8] = calcErr_bin(file_c_dists,file_cc_dists,k,Float32)
+              resultsTime[count_p,8] = b_t
           else
               indxs_cc = zeros(Int32,k,pointsQ[count_p])
               dists_cc = zeros(Float32,k,pointsQ[count_p])
@@ -606,12 +950,13 @@ function batchTest(
               else
                   b_t = @elapsed indxs_cc, dists_cc = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,7,in_memory)
               end
-              resultsAcc[count_p,7] = calcAcc(indxs_c,indxs_cc)
-              resultsErr[count_p,7] = calcErr(dists_c,dists_cc)
-              resultsTime[count_p,7] = b_t
+              resultsAcc[count_p,8] = calcAcc(indxs_c,indxs_cc)
+              resultsErr[count_p,8] = calcErr(dists_c,dists_cc)
+              resultsTime[count_p,8] = b_t
           end
           
-          println("$(resultsTime[count_p,7]) secs")
+          println("$(resultsTime[count_p,8]) secs")
+          println("$(resultsAcc[count_p,8]) %%")
 
          @everywhere GC.gc(true)           
          
@@ -633,12 +978,13 @@ function batchTest(
               else
                   b_t = @elapsed indxs_p, dists_p = distributedKNN(filename_input_C,filename_input_Q,k,d, pointsC[count_p],pointsQ[count_p],C_size,Q_size,4,in_memory)
               end
-              resultsAcc[count_p,8] = calcAcc(indxs_c,indxs_p)
-              resultsErr[count_p,8] = calcErr(dists_c,dists_p)
-              resultsTime[count_p,8] = b_t
+              resultsAcc[count_p,9] = calcAcc(indxs_c,indxs_p)
+              resultsErr[count_p,9] = calcErr(dists_c,dists_p)
+              resultsTime[count_p,9] = b_t
           end
           
-         println("$(resultsTime[count_p,8]) secs")
+         println("$(resultsTime[count_p,9]) secs")
+         println("$(resultsAcc[count_p,9]) %%")
          
          println("Comparing FLANN with GPU results")
          if in_memory == false
@@ -681,19 +1027,19 @@ function batchTest(
        
       println("Generating result graphs")
       
-      p = plot(nam[1,:], resultsTime, title = "Performance comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Time (sec)", xlabel = "Points (number)",size = (1600, 1400));
+       p = plot(nam[1,:], resultsTime, title = "Performance comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "CPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Time (sec)", xlabel = "Points (number)",size = (1600, 1400), palette = pal);
       
-      p2 = plot(nam[1,:], resultsAcc, title = "Accuracy comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Accuracy (%)", xlabel = "Points (number)", size = (1600, 1400));
+      p2 = plot(nam[1,:], resultsAcc, title = "Accuracy comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Accuracy (%)", xlabel = "Points (number)", size = (1600, 1400), palette = pal);
       
-      p3 = plot(nam[1,:], resultsErr, title = "Error comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Error (std)",xlabel = "Points (number)", size = (1600, 1400));
+      p3 = plot(nam[1,:], resultsErr, title = "Error comparison", label= ["FLANN (bf)" "FLANN (app)" "GPU" "Rand Pr (GPU)" "Rand Pr (CPU)" "Cluster TI (GPU)" "Cluster TI (CPU)" "ParallelKNN"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Error (std)",xlabel = "Points (number)", size = (1600, 1400), palette = pal);
       
-      p4 = plot(nam[1,:], resultsBest, title = "Algorithm results comparison FLANN - GPU", label= ["FLANN (bf) wins" "GPU wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400));
+      p4 = plot(nam[1,:], resultsBest, title = "Algorithm results comparison FLANN - GPU", label= ["FLANN (bf) wins" "GPU wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400), palette = pal);
       
-      p5 = plot(nam[1,:], resultsBest2, title = "Algorithm results comparison FLANN - CPU", label= ["FLANN (bf) wins" "CPU wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400));
+      p5 = plot(nam[1,:], resultsBest2, title = "Algorithm results comparison FLANN - CPU", label= ["FLANN (bf) wins" "CPU wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400), palette = pal);
       
-      p6 = plot(nam[1,:], resultsBest3, title = "Algorithm results comparison CPU - GPU", label= ["CPU wins" "GPU wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400));
+      p6 = plot(nam[1,:], resultsBest3, title = "Algorithm results comparison CPU - GPU", label= ["CPU wins" "GPU wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400), palette = pal);
       
-      p7 = plot(nam[1,:], resultsBest4, title = "Algorithm results comparison GPU - ParallelKNN", label= ["GPU wins" "ParallelKNN wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400));
+      p7 = plot(nam[1,:], resultsBest4, title = "Algorithm results comparison GPU - ParallelKNN", label= ["GPU wins" "ParallelKNN wins" "Tie"], left_margin = 20mm, bottom_margin = 20mm, lw = 4, ylabel = "Percent of wins for each algorithm (%)",xlabel = "Points (number)", size = (1600, 1400), palette = pal);
       
       savefig(p, "./Graphs/Time_comparisons.png")
       
@@ -743,8 +1089,8 @@ function batchTest(
       return nothing
 end
 
+batchTest(filename_input_C, filename_input_Q, file_d_indxs, file_d_dists, file_a_indxs,file_a_dists, file_g_indxs, file_g_dists, file_c_indxs, file_c_dists, file_p_indxs, file_p_dists, file_cc_indxs, file_cc_dists, file_cg_indxs, file_cg_dists, file_rpc_indxs, file_rpc_dists, file_rpg_indxs, file_rpg_dists, 150, 28, 3, 15, 6400, 6400, false, true)
 
-batchTest(filename_input, file_d_indxs, file_d_dists, file_a_indxs, file_a_dists, file_g_indxs, file_g_dists, file_c_indxs, file_c_dists, file_p_indxs, file_p_dists, 150,28,6400,6400,true,true)
 
       
       
