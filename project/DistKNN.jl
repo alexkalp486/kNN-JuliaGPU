@@ -1020,7 +1020,7 @@ function TI_filter(
              @sync begin
                  @inbounds Threads.@threads for w in 1:qSize
                     for z in 1:cSize
-                        if (clusterList[aC[z],aQ[w]] !=0) && (abs(dist_cen[aC[z],aQ[w]] - distfromCen_C[z,aC[z]]) <= qUB[aQ[w]]) 
+                        if ((clusterList[aC[z],aQ[w]] !=0) && (abs(dist_cen[aC[z],aQ[w]] - distfromCen_C[z,aC[z]]) <= qUB[aQ[w]]) )
                            candidateList[z,w] += 1
                         end
 
@@ -1030,25 +1030,26 @@ function TI_filter(
                 end
             end
             
-           
-            checkList = nothing
-            
-            
-            dist_cen = nothing
-    
-            distfromCen_C = nothing
-            
-            
-            clstQ = nothing
-            aQ = nothing
-            
-            clstC = nothing
-            aC = nothing
-            
-          
-            qUB = nothing
-            lowerBounds = nothing
-            clusterList = nothing
+           @sync begin
+                checkList = nothing
+                
+                
+                dist_cen = nothing
+        
+                distfromCen_C = nothing
+                
+                
+                clstQ = nothing
+                aQ = nothing
+                
+                clstC = nothing
+                aC = nothing
+                
+              
+                qUB = nothing
+                lowerBounds = nothing
+                clusterList = nothing
+            end
             
             return candidateList
 end
@@ -4310,7 +4311,7 @@ function distributedKNN(
       end
       
       #numJobs = ceil(Int32, nQ/qSize)
-      numJobs = ceil(Int32, b/qSize) * nw
+      numJobs = max( 1, ceil(Int32, b/qSize) ) * nw
       progress = RemoteChannel(()->Channel{Tuple}(numJobs));
       
       jobBounds = []
@@ -4548,7 +4549,7 @@ function distributedKNN(
       end
       
       #numJobs = ceil(Int32, nQ/qSize)
-      numJobs = ceil(Int32, b/qSize) * nw
+      numJobs = max( 1, ceil(Int32, b/qSize) ) * nw
       progress = RemoteChannel(()->Channel{Tuple}(numJobs));
       
       if isfile(file_indxs_out)
