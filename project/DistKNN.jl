@@ -68,7 +68,7 @@ end
          offset::Int,
          stopP::Int
          )
-         #di = [Pair(i, d) for (i,d) in enumerate(Distance[1:stopP,:])]
+         
          di = [Pair(i, d) for (i,d) in enumerate(Distance[1:stopP])]
          
          if size(Indxs_out,1) < k || size(Dists_out,1) < k
@@ -78,7 +78,7 @@ end
              error("The input and output arrays for the fast_sortperm function have different sizes")
          end
          
-         #@inbounds sort!(di, dims=1, by=x->x.second, alg=PartialQuickSort(1:k))
+         
          @inbounds sort!(di, by=x->x.second, alg=PartialQuickSort(1:k))
          
          i = 1
@@ -417,7 +417,7 @@ end
         d::Int
         )
         
-        #sQ = @views @inbounds LinearAlgebra.BLAS.dot(d,Q[1:d,pointQ],1,Q[1:d,pointQ],1)
+        
         
         if d > 3
             @inbounds for j in 1:nC
@@ -446,8 +446,6 @@ end
             end
         else       
             @inbounds for j in 1:nC
-                #sC = @views @inbounds LinearAlgebra.BLAS.dot(d,C[1:d,j],1,C[1:d,j],1)
-                #@views @inbounds Distance[j,pointQ] = sQ + sC - 2* LinearAlgebra.BLAS.dot(d,Q[1:d,pointQ],1,C[1:d,j],1)
                 
                 Distance[j,pointQ] = 0.0f0
                 
@@ -475,15 +473,11 @@ end
                 tempDist = 0.0f0
                 temp = 0.0f0
 
-                for k in 1:d
-                    #temp[p] = Q[k,i] - C[k,j]
-                    #tempDist[p] += temp[p]*temp[p]
-                    
-                    
+                for k in 1:d                   
                     temp = Q[k,i] - C[k,j]
                     tempDist += temp*temp
                 end
-                #@inbounds Distance[j,i] = tempDist[p]
+
                 @inbounds Distance[j,i] = tempDist
             end
         end
@@ -560,20 +554,12 @@ end
                
                if process != 1
                   if stopQ < nQ
-                     #NQ = length(1:stopQ)
                      NQ = stopQ
                   end
                   if stopC < nC
-                     #NC = length(1:stopC)
                      NC = stopC
                   end
                end
-               
-               #kernel = @cuda name="euclDistGPU" launch=false euclDistGPU(Q_d, C_d, Distance_d, NQ, NC, d)
-               #config = launch_configuration(kernel.fun)
-               #threads = Base.min(NC, config.threads)
-               #blocks = cld(NC, threads)
-               #kernel(Q_d, C_d, Distance_d, NQ, NC, d; threads=threads, blocks=blocks)
                
                kernel = @cuda name="euclDistGPUb" launch=false euclDistGPUb(Q_d, C_d, Distance_d, NQ, NC, d)
                config = launch_configuration(kernel.fun)
@@ -583,9 +569,7 @@ end
                sqBlock = isqrt(blockSize)
                sblX = min(NC, sqBlock)
                sblY = min(NQ, sqBlock)
-                
-               #nblX = cld(NC, sblX)
-               #nblY = cld(NQ, sblY)
+
                nblX = ceil(Int32, NC/sblX)
                nblY = ceil(Int32, NQ/sblY)
                
@@ -1196,12 +1180,8 @@ function rpKNN_CPU!(
              candidateList = zeros(Int32, cSize, qSize)
              
              @views @inbounds for rp in 1:P
-                 #R .= randmatrix(r,d)
                  randmatrix!(R,r,d)
-                 
-                 #Cr .= R*C
-                 #Qr .= R*Q
-                 
+                            
                  mul!(Cr,R,C)
                  mul!(Qr,R,Q)
                  
@@ -1216,13 +1196,6 @@ function rpKNN_CPU!(
                             
                          nothing
                  end  
-                 #@views @inbounds Threads.@threads for i in 1:qSize
-                  #      for j in 1:kr
-                   #          candidateList[idxs_rp[j,i],i] += 1
-                   #     end
-                        
-                   #     nothing
-                 #end
                  if rp%5 == 0 
                      GC.gc()
                  end
@@ -1274,9 +1247,7 @@ function rpKNN_GPU!(
              )
              
              qSize = size(Q,2)
-             cSize = size(C,2)
-             
-             #r = Int(ceil(sqrt(d)))
+             cSize = size(C,2)           
              
              if P <= 0
                   P = 3
@@ -1289,8 +1260,6 @@ function rpKNN_GPU!(
              C_d = CuArray(C)
              Q_d = CuArray(Q)
              
-             #idxs = zeros(Int32, k, qSize)
-             #dist = zeros(Float32, k, qSize)
              
              kr = max(4*k, Int(ceil(cSize/10)))
              kr = min(kr, cSize-1)
@@ -1298,11 +1267,8 @@ function rpKNN_GPU!(
              idxs_rp = zeros(Int32, kr, qSize)
              dist_rp = zeros(Float32, kr, qSize)
              
-             #distance = zeros(Float32,cSize,qSize)
              distance = CUDA.Mem.pin(zeros(Float32,cSize,qSize))
              tempIndex = zeros(Int32,cSize,qSize)
-             
-             #distance_d = CuArray(distance)
              
              distance_d_even = CuArray(distance)
              distance_d_odd = CuArray(distance)
@@ -1317,18 +1283,13 @@ function rpKNN_GPU!(
              candidateList = zeros(Int32, cSize, qSize)
              candidateList_d = CuArray(candidateList)
              
-             #candidateRank = zeros(Int32, cSize, qSize)
              
              sort_finished = @async nothing
              
              @views @inbounds for rp in 1:P
-                 #R .= randmatrix(r,d)
                  randmatrix!(R,r,d)
                  
-                 copyto!(R_d, R)
-                 
-                 #CUDA.@sync Cr_d = R_d*C_d
-                 #CUDA.@sync Qr_d = R_d*Q_d
+                 copyto!(R_d, R) 
                  
                  CUDA.@sync mul!(Cr_d,R_d,C_d)
                  CUDA.@sync mul!(Qr_d,R_d,Q_d)
@@ -1338,11 +1299,6 @@ function rpKNN_GPU!(
                  else
                         CUDA.@sync euclDistGPU_wrapper!(Qr_d,Cr_d,distance_d_odd,qSize,cSize,r,length(1:qSize),length(1:cSize),2)
                  end
-                 
-                 #CUDA.@sync Cr_d = R_d*C_d
-                 #CUDA.@sync Qr_d = R_d*Q_d
-                 
-                 #CUDA.@sync euclDistGPU_wrapper!(Qr_d,Cr_d,distance_d,qSize,cSize,r,length(1:qSize),length(1:cSize),2)
                  
                  wait(sort_finished)
                  
@@ -1356,7 +1312,6 @@ function rpKNN_GPU!(
                         copyto!(distance, distance_d_odd)
                     end
                  
-                     #copyto!(distance, distance_d)
                      
                      @inbounds @views Threads.@threads for l in 1:qSize   
                              idxs_rp[1:kr,l] .= partialsortperm!(tempIndex[1:cSize,l],distance[1:cSize,l],1:kr,initialized=false)
@@ -1364,7 +1319,6 @@ function rpKNN_GPU!(
                              
                              for j in 1:kr
                                  candidateList[idxs_rp[j,l],l] += 1
-                                 #candidateRank[idxs_rp[j,l],l] += idxs_rp[j,l]
                              end
                              
                              nothing
@@ -1379,7 +1333,6 @@ function rpKNN_GPU!(
              
              copyto!(candidateList_d, candidateList)
              euclDistGPU_filter_wrapper!(Q_d,C_d,distance_d_even,candidateList_d,qSize,cSize,d,length(1:qSize),length(1:cSize),2)
-             #euclDist_filter(Q,C,distance,candidateList,qSize,cSize,d)
              
              copyto!(distance, distance_d_even)
              @views @inbounds Threads.@threads for l in 1:qSize
@@ -1401,7 +1354,6 @@ function rpKNN_GPU!(
             CUDA.unsafe_free!(Qr_d)
             CUDA.unsafe_free!(Cr_d)
             CUDA.unsafe_free!(R_d)
-            #CUDA.unsafe_free!(distance_d)
             CUDA.unsafe_free!(distance_d_even)
             CUDA.unsafe_free!(distance_d_odd)
             CUDA.unsafe_free!(candidateList_d)
@@ -1514,7 +1466,6 @@ function cenKNN_GPU!(
              candidateList = zeros(Int32, cSize, qSize)
              candidateList_d = CuArray(candidateList)
              
-             #candidateList .= cenTI_filter_GPU(C,Q,d,k,MQ,aQ)
              candidateList .= cenTI_filter(C,Q,d,k,MQ,aQ)
              
              copyto!(candidateList_d, candidateList)
@@ -1877,8 +1828,6 @@ function distPointParKNN(
                        dist_seg[kmax+1:k,1:length(qStart:qStop)] .= typemax(Float32)
                    end
             
-                   #addOffset!(idxs_seg, 1, length(qStart:qStop), cOff)
-            
                    if j > 1
                       mergeSeg!(idxs, dist, idxs_seg, dist_seg, Indx, Dists)
                    else
@@ -2182,7 +2131,6 @@ function distPointFaiss(
                        dist_seg[kmax+1:k,1:length(qStart:qStop)] .= typemax(Float32)
                    end
             
-                   #addOffset!(idxs_seg, 1, length(qStart:qStop), cOff)
             
                    if j > 1
                       mergeSeg!(idxs, dist, idxs_seg, dist_seg, Indx, Dists)
@@ -2315,9 +2263,7 @@ function distPointKNN_GPU(
                 cOff = cStart - 1  
                 
                 @inbounds for j in 1:cBlock
-                   load_file_wrapper!(filenameC,d,C, cStart:cStop)
-                   
-                   #println("qBlock $qBlock cBlock $cBlock qStart $qStart qStop $qStop cStart $cStart cStop $cStop")
+                   load_file_wrapper!(filenameC,d,C, cStart:cStop)                   
                    
                    copyto!(C_d, C)
                    
@@ -2348,12 +2294,6 @@ function distPointKNN_GPU(
                        
                        calc_results!(idxs_seg, dist_seg, tempIndex, distance, c_length, q_length, kmax, cOff)
                        
-                       #@views @inbounds Threads.@threads for l in 1:q_length                   
-                       #   idxs_seg[1:kmax,l] .= partialsortperm!(tempIndex[1:c_length,l],distance[1:c_length,l],1:kmax,initialized=false) .+ cOff
-                       #   dist_seg[1:kmax,l] .= distance[tempIndex[1:kmax,l],l]
-                       # 
-                       #   nothing
-                       #end
                        
                        if kmax < k
                             dist_seg[kmax+1:k,1:q_length] .= typemax(Float32)
@@ -2381,9 +2321,6 @@ function distPointKNN_GPU(
                if (qLocStop - qLocStart) == (qSize - 1)
                    copy2dArrPart!(idxs_out,qLocStart,qLocStop,idxs,1,qSize)
                    copy2dArrPart!(dist_out,qLocStart,qLocStop,dist,1,qSize)
-                   
-                   #@views @inbounds idxs_out[1:k,qLocStart:qLocStop] .= idxs[1:k,1:qSize]
-                   #@views @inbounds dist_out[1:k,qLocStart:qLocStop] .= dist[1:k,1:qSize]
                else
                     lcount = 1
                      @inbounds for z in qLocStart:qLocStop
@@ -2406,7 +2343,6 @@ function distPointKNN_GPU(
               
                
                put!(progress, (i, qBlock, gpuID, myid()))
-               #println("Printed i $i qBlock $qBlock gpuID $gpuID myid $(myid()) ")
                
                GC.gc()
             end            
@@ -2541,14 +2477,7 @@ function distPointKNN_GPU_fileout(
                    end
                    
                    calc_results!(idxs_seg, dist_seg, tempIndex, distance, c_length, q_length, kmax, cOff)
-                   
-                   #@views @inbounds Threads.@threads for l in 1:q_length                   
-                   #       idxs_seg[1:kmax,l] .= partialsortperm!(tempIndex[1:c_length,l],distance[1:c_length,l],1:kmax,initialized=false) .+ cOff
-                   #       dist_seg[1:kmax,l] .= distance[tempIndex[1:kmax,l],l]
-                   #     
-                   #       nothing
-                   #    end
-                   
+
                    if kmax < k
                        dist_seg[kmax+1:k,1:q_length] .= typemax(Float32)
                    end
@@ -2666,7 +2595,6 @@ function distPointKNN_rp_GPU(
              
              
              np = Threads.nthreads()
-             #th = qSize ÷ np
              th = ceil(Int32, qSize/np)
             
              merge_needed = false
@@ -2693,15 +2621,7 @@ function distPointKNN_rp_GPU(
                    q_length = min(qSize, length(qStart:qStop)) 
                    c_length = min(cSize, length(cStart:cStop))
 
-                   kmax = min(k, c_length)
-                   
-                   #tmp_idxs, temp_dists = rpKNN_GPU(Q[:,1:q_length],C[:,1:c_length],d,k,r,P)
-                   
-                   #idxs_seg[1:k,1:q_length] .= tmp_idxs[1:k,1:q_length] .+ cOff
-                   #dist_seg[1:k,1:q_length] .= temp_dists[1:k,1:q_length]
-                   
-                   #tmp_idxs = nothing
-                   #temp_dists = nothing     
+                   kmax = min(k, c_length)  
                    
                    rpKNN_GPU!(Q[:,1:q_length],C[:,1:c_length],d,kmax,r,P,idxs_seg[1:kmax,1:q_length],dist_seg[1:kmax,1:q_length])
                    
@@ -2836,7 +2756,6 @@ function distPointKNN_rp_GPU_fileout(
          tempIndex = zeros(Int32,cSize,qSize) 
          
          np = Threads.nthreads()
-         #th = qSize ÷ np
          th = ceil(Int32, qSize/np)
          
          nw = nworkers()
@@ -2868,14 +2787,6 @@ function distPointKNN_rp_GPU_fileout(
 
                kmax = min(k, c_length)
 
-               #tmp_idxs, temp_dists =  rpKNN_GPU(Q[:,1:q_length],C[:,1:c_length],d,k,r,P)
-                   
-                #   idxs_seg[1:k,1:q_length] .= tmp_idxs[1:k,1:q_length] .+ cOff
-                 #  dist_seg[1:k,1:q_length] .= temp_dists[1:k,1:q_length]
-                   
-                  # tmp_idxs = nothing
-                  # temp_dists = nothing 
-
                rpKNN_GPU!(Q[:,1:q_length],C[:,1:c_length],d,kmax,r,P,idxs_seg[1:kmax,1:q_length],dist_seg[1:kmax,1:q_length])
                    
                idxs_seg[1:kmax,1:q_length] .= idxs_seg[1:kmax,1:q_length] .+ cOff
@@ -2887,7 +2798,6 @@ function distPointKNN_rp_GPU_fileout(
                merge_needed = j > 1 ? true : false        
                if merge_needed
                   mergeSeg!(idxs, dist, idxs_seg, dist_seg, Indx, Dists)
-                  #mergeSeg!(idxs, dist, idxs_seg, dist_seg)
                else
                   copy2dArr!(idxs, idxs_seg)
                   copy2dArr!(dist, dist_seg)
@@ -3004,7 +2914,6 @@ function distPointKNN_cen_GPU(
              
              
              np = Threads.nthreads()
-             #th = qSize ÷ np
              th = ceil(Int32, qSize/np)
             
              merge_needed = false
@@ -3167,7 +3076,6 @@ function distPointKNN_cen_GPU_fileout(
          tempIndex = zeros(Int32,cSize,qSize) 
          
          np = Threads.nthreads()
-         #th = qSize ÷ np
          th = ceil(Int32, qSize/np)
          
          nw = nworkers()
@@ -3210,7 +3118,6 @@ function distPointKNN_cen_GPU_fileout(
                merge_needed = j > 1 ? true : false        
                if merge_needed
                   mergeSeg!(idxs, dist, idxs_seg, dist_seg, Indx, Dists)
-                  #mergeSeg!(idxs, dist, idxs_seg, dist_seg)
                else
                   copy2dArr!(idxs, idxs_seg)
                   copy2dArr!(dist, dist_seg)
@@ -3925,7 +3832,6 @@ function distPointKNN_CPU(
              
              
              np = Threads.nthreads()
-             #th = qSize ÷ np
              th = ceil(Int32, qSize/np)
             
              merge_needed = false
@@ -4134,7 +4040,6 @@ function distPointKNN_CPU_fileout(
                merge_needed = j > 1 ? true : false        
                if merge_needed
                   mergeSeg!(idxs, dist, idxs_seg, dist_seg, Indx, Dists)
-                  #mergeSeg!(idxs, dist, idxs_seg, dist_seg)
                else
                   copy2dArr!(idxs, idxs_seg)
                   copy2dArr!(dist, dist_seg)
@@ -4253,7 +4158,6 @@ function distPointKNN_rp_CPU(
              
              
              np = Threads.nthreads()
-             #th = qSize ÷ np
              th = ceil(Int32, qSize/np)
             
              merge_needed = false
@@ -4412,7 +4316,6 @@ function distPointKNN_rp_CPU_fileout(
          tempIndex = zeros(Int32,cSize,qSize) 
          
          np = Threads.nthreads()
-         #th = qSize ÷ np
          th = ceil(Int32, qSize/np)
          
          nw = nworkers()
@@ -4455,7 +4358,6 @@ function distPointKNN_rp_CPU_fileout(
                merge_needed = j > 1 ? true : false        
                if merge_needed
                   mergeSeg!(idxs, dist, idxs_seg, dist_seg, Indx, Dists)
-                  #mergeSeg!(idxs, dist, idxs_seg, dist_seg)
                else
                   copy2dArr!(idxs, idxs_seg)
                   copy2dArr!(dist, dist_seg)
@@ -4571,7 +4473,6 @@ function distPointKNN_cen_CPU(
              
              
              np = Threads.nthreads()
-             #th = qSize ÷ np
              th = ceil(Int32, qSize/np)
             
              merge_needed = false
@@ -4731,7 +4632,6 @@ function distPointKNN_cen_CPU_fileout(
          tempIndex = zeros(Int32,cSize,qSize) 
          
          np = Threads.nthreads()
-         #th = qSize ÷ np
          th = ceil(Int32, qSize/np)
          
          nw = nworkers()
@@ -4886,8 +4786,6 @@ function distributedKNN(
          qSize = b
       end
       
-      
-      #numJobs = ceil(Int32, nQ/qSize)
       numJobs = max( 1, ceil(Int32, b/qSize) ) * nw
       progress = RemoteChannel(()->Channel{Tuple}(numJobs));
       
@@ -4905,7 +4803,6 @@ function distributedKNN(
       end
       println(" Total number of job segments: $numJobs")
       
-      #@sync begin
       jobCount = min(numJobs, nw)
       
       startP = 1
@@ -4996,7 +4893,6 @@ function distributedKNN(
          
          push!(placeholders,pl)
          push!(jobBounds, (startP,stopP))
-         #println("numJobs $numJobs startP $startP stopP $stopP jobCount $jobCount cSize $cSize qSize $qSize nC $nC nQ $nQ")
          
          if jobCount == 0 
              break
@@ -5005,7 +4901,6 @@ function distributedKNN(
          startP = min(stopP + 1, nQ)
          stopP = min(stopP + b, nQ)
       end
-       #end
        
        jobCount = numJobs
        counter = 0
@@ -5032,11 +4927,6 @@ function distributedKNN(
        if in_memory == false
            @inbounds for j in workers()
                filename_indxs, filename_dists = fetch(popfirst!(placeholders))
-               #try
-               #     filename_indxs, filename_dists = fetch(popfirst!(placeholders))
-               #catch ex
-               #      println(ex)
-               #end
                
                locStart, locStop = popfirst!(jobBounds)
                
@@ -5051,9 +4941,6 @@ function distributedKNN(
                if isfile(filename_dists)
                   rm(filename_dists)
                end
-               
-               #nearestKN[1:k,startP:stopP] .= idxs_seg[1:k,:]
-               #distsKN[1:k,startP:stopP] .= dist_seg[1:k,:]
                
                nearestKN[1:k,locStart:locStop] .= idxs_seg[1:k,:]
                distsKN[1:k,locStart:locStop] .= dist_seg[1:k,:]
@@ -5076,10 +4963,7 @@ function distributedKNN(
                locStart, locStop = popfirst!(jobBounds)
                
                jobCount -= 1
-               
-               #nearestKN[1:k,startP:stopP] .= idxs_seg[1:k,:]
-               #distsKN[1:k,startP:stopP] .= dist_seg[1:k,:]
-               
+
                nearestKN[1:k,locStart:locStop] .= idxs_seg[1:k,:]
                distsKN[1:k,locStart:locStop] .= dist_seg[1:k,:]
                
@@ -5143,7 +5027,6 @@ function distributedKNN(
       end
       
       
-      #numJobs = ceil(Int32, nQ/qSize)
       numJobs = max( 1, ceil(Int32, b/qSize) ) * nw
       progress = RemoteChannel(()->Channel{Tuple}(numJobs));
       
@@ -5168,7 +5051,6 @@ function distributedKNN(
       
       jobCount = min(numJobs, nw)
       
-      #@sync begin
       startP = 1
       stopP = b
       for j in workers()
@@ -5263,7 +5145,6 @@ function distributedKNN(
          startP = min(stopP + 1, nQ)
          stopP = min(stopP + b, nQ)
       end
-       #end
        
        jobCount = numJobs
        counter = 0
@@ -5291,11 +5172,6 @@ function distributedKNN(
        if in_memory == false
            @inbounds for j in workers()
                filename_indxs, filename_dists = fetch(popfirst!(placeholders))
-               #try
-               #    filename_indxs, filename_dists = fetch(popfirst!(placeholders))
-               #catch ex
-               #    println(ex)
-               #end
                
                jobCount -= 1
            
